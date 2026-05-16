@@ -328,8 +328,10 @@ function RouteMap({ plan, startLocation }) {
         style={{ height: 380, width: '100%', zIndex: 0 }}
       >
         <TileLayer
-          attribution='&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+          subdomains="abcd"
+          maxZoom={20}
         />
         {satRoute.length >= 2 && (
           <Polyline positions={satRoute} pathOptions={{ color: '#7c3aed', weight: 3, opacity: 0.75, dashArray: '6,8' }} />

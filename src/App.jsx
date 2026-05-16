@@ -1207,6 +1207,20 @@ function JGAPlaner({ roomCode, onLeave, userName, setUserName }) {
                               {item.status || 'offen'}
                             </button>
                           )}
+                          {(() => {
+                            const voters = Array.isArray(votes[item.id]) ? votes[item.id] : [];
+                            const iVoted = userName && voters.includes(userName);
+                            return (
+                              <button
+                                onClick={() => toggleVote(item.id)}
+                                disabled={!userName}
+                                title={voters.length > 0 ? `Dabei: ${voters.join(', ')}` : 'Noch keine Stimmen'}
+                                className={`text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 border ${iVoted ? 'bg-violet-100 text-violet-700 border-violet-300 dark:bg-violet-950 dark:text-violet-300 dark:border-violet-700' : 'bg-zinc-100 text-zinc-600 border-transparent dark:bg-zinc-800 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'} disabled:opacity-30 disabled:cursor-not-allowed`}>
+                                <ThumbsUp size={10} className={iVoted ? 'fill-current' : ''} />
+                                <span className="font-medium">{voters.length}{groupSize > 1 ? `/${groupSize}` : ''}</span>
+                              </button>
+                            );
+                          })()}
                         </div>
                       </div>
                       <div className="flex-shrink-0 flex flex-col gap-1">

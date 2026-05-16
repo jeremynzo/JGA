@@ -233,13 +233,45 @@ function FitBoundsHelper({ points }) {
   const map = useMap();
   useEffect(() => {
     if (!points || points.length === 0) return;
-    if (points.length === 1) {
-      map.setView(points[0], 10);
-      return;
-    }
-    const bounds = L.latLngBounds(points);
-    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 11 });
+    // Erst auf nächsten Tick warten, damit Container-Größe stimmt
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+      if (points.length === 1) {
+        map.setView(points[0], 10);
+        return;
+      }
+      const bounds = L.latLngBounds(points);
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 11 });
+    }, 50);
+    return () => clearTimeout(timer);
   }, [points, map]);
+  return null;
+}
+
+function MapResizeHandler() {
+  const map = useMap();
+  useEffect(() => {
+    const invalidate = () => map.invalidateSize();
+    // Mehrfach nach Mount, weil das Layout sich evtl. noch ändert (Bilder laden, Fonts, etc.)
+    const t1 = setTimeout(invalidate, 100);
+    const t2 = setTimeout(invalidate, 400);
+    const t3 = setTimeout(invalidate, 1000);
+    // Auch auf Container-Size-Changes reagieren (z.B. wenn Map ein-/ausgeblendet wird)
+    const container = map.getContainer();
+    let observer;
+    if (container && typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(invalidate);
+      observer.observe(container);
+    }
+    window.addEventListener('resize', invalidate);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+      window.removeEventListener('resize', invalidate);
+      if (observer) observer.disconnect();
+    };
+  }, [map]);
   return null;
 }
 
@@ -321,6 +353,7 @@ function RouteMap({ plan, startLocation }) {
           </Marker>
         ))}
         <FitBoundsHelper points={allCoords} />
+        <MapResizeHandler />
       </MapContainer>
       <div className="bg-zinc-100 dark:bg-zinc-900/50 px-4 py-2 flex items-center gap-4 text-xs flex-wrap text-zinc-600 dark:text-zinc-400">
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-zinc-500"></span>Start</span>

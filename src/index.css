@@ -23,26 +23,14 @@ html, body, #root {
   z-index: 5 !important;
 }
 
-/* Fix für Tailwind preflight: Leaflet-Kacheln und Marker dürfen nicht durch
-   die globale img-Regel (max-width: 100%) verzerrt werden, sonst gibt's
-   zerstückelte Karten. */
-.leaflet-container img,
-.leaflet-container img.leaflet-tile {
+/* Fix für Tailwind preflight: nur die Bilder dürfen NICHT auf max-width:100% gezwungen werden,
+   sonst werden Kacheln verzerrt. Container-Dimensionen NICHT anfassen - die managed Leaflet selbst. */
+.leaflet-container img {
   max-width: none !important;
   max-height: none !important;
-}
-.leaflet-tile,
-.leaflet-marker-icon,
-.leaflet-marker-shadow,
-.leaflet-image-layer,
-.leaflet-tile-container {
-  max-width: none !important;
-  max-height: none !important;
-  width: auto;
-  height: auto;
 }
 
-/* Popups sollen lesbar bleiben */
+/* Popups lesbar halten */
 .leaflet-popup-content {
   margin: 10px 14px;
   font-size: 13px;

@@ -1,0 +1,1001 @@
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import {
+  Car, Truck, Tent, Music, Plus, ChevronUp, ChevronDown, X, Search,
+  Mountain, Building2, Beer, PartyPopper, Utensils, ArrowDown, AlertTriangle,
+  MapPin, Check, RotateCcw, Clock, Sparkles, EyeOff, Eye, Undo2,
+  Users, LogOut, Copy, Wifi, WifiOff
+} from 'lucide-react';
+import { supabase } from './supabase';
+
+// ============= Konstanten =============
+const STUTTGART = [48.7758, 9.1829];
+const DAYS = ['sat', 'sun'];
+const DAY_LABEL = { sat: 'Samstag 22.08.', sun: 'Sonntag 23.08.' };
+const DAY_SHORT = { sat: 'Sa 22.08.', sun: 'So 23.08.' };
+const DAY_START_TIME = { sat: 9 * 60, sun: 9 * 60 };
+
+const CATS = {
+  transport:  { label: 'Transport',   Icon: Truck,        badge: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' },
+  auto:       { label: 'Ring & Auto', Icon: Car,          badge: 'bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300' },
+  adventure:  { label: 'Adventure',   Icon: Mountain,     badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' },
+  party:      { label: 'Party',       Icon: Music,        badge: 'bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300' },
+  essen:      { label: 'Essen',       Icon: Utensils,     badge: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300' },
+  schlafen:   { label: 'Schlafen',    Icon: Tent,         badge: 'bg-stone-100 text-stone-700 dark:bg-stone-800 dark:text-stone-300' },
+  kultur:     { label: 'Kultur',      Icon: Building2,    badge: 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300' },
+  chill:      { label: 'Chill',       Icon: Beer,         badge: 'bg-lime-100 text-lime-700 dark:bg-lime-950 dark:text-lime-300' },
+  braeutigam: { label: 'Bräutigam',   Icon: PartyPopper,  badge: 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300' }
+};
+
+const STATUS_LIST = ['offen', 'angefragt', 'gebucht'];
+const STATUS_CLASS = {
+  offen:     'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400',
+  angefragt: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
+  gebucht:   'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+};
+
+const ACTIVITIES = [
+  { id: 'transport', cat: 'transport', name: '9-Sitzer Sprinter Anreise Stuttgart → Eifel', region: 'Transport', coords: [50.3356, 6.9475], duration: 240, price: 60, desc: 'Mietwagen-Anteil pro Person fürs Wochenende' },
+  { id: 'ringtaxi-m3', cat: 'auto', name: 'Ringtaxi BMW M3 CS Karussell', region: 'Nürburgring', coords: [50.3356, 6.9475], duration: 90, price: 135, desc: '3 BMW M3 CS parallel, alle 8 fahren mit Profi über die Nordschleife' },
+  { id: 'gt3rs', cat: 'auto', name: 'Hot Lap Porsche GT3 RS (nur Bräutigam)', region: 'Nürburgring', coords: [50.3356, 6.9475], duration: 30, price: 50, desc: 'Manthey-Porsche, 399 € auf Gruppe aufgeteilt' },
+  { id: 'rent4ring', cat: 'auto', name: 'Touristenfahrt Rent4Ring Mini Cooper S', region: 'Nürburgring', coords: [50.3356, 6.9475], duration: 60, price: 80, desc: 'Mietwagen mit Ringversicherung, selbst fahren' },
+  { id: 'kart-ring', cat: 'auto', name: 'ring°kartbahn E-Karts indoor', region: 'Nürburgring', coords: [50.3329, 6.9410], duration: 75, price: 25, desc: 'Indoor E-Karts direkt am Ring' },
+  { id: 'bruennchen', cat: 'chill', name: 'Brünnchen zuschauen + Bier', region: 'Nürburgring', coords: [50.3445, 6.9747], duration: 90, price: 5, desc: 'Vom Brünnchen-Parkplatz Touristenfahrten beobachten' },
+  { id: 'pistenklause', cat: 'essen', name: 'Pistenklause Steak vom heißen Stein', region: 'Nürburg', coords: [50.3389, 6.9489], duration: 120, price: 45, desc: 'Ring-Kult, Reservierung 02691 922053' },
+  { id: 'devils', cat: 'essen', name: "Devil's Diner Mittag", region: 'Nürburgring', coords: [50.3324, 6.9410], duration: 60, price: 18, desc: 'Burger und Bier an der Döttinger Höhe' },
+  { id: 'fascination', cat: 'essen', name: 'Brunch Dorint Fascination', region: 'Nürburg', coords: [50.3361, 6.9509], duration: 90, price: 22, desc: 'Sonntag-Brunch im Dorint Hocheifel' },
+  { id: 'ringwerk', cat: 'kultur', name: 'ring°werk Museum', region: 'Nürburgring', coords: [50.3329, 6.9484], duration: 90, price: 14, desc: 'Motorsport-Museum direkt am Ring' },
+  { id: 'zipline', cat: 'adventure', name: 'EifelAdventures Zipline-Tour', region: 'Berlingen', coords: [50.0989, 6.6275], duration: 150, price: 49, desc: '12 Ziplines inkl. Mega-Zipline, 2,5 h' },
+  { id: 'kletterwald', cat: 'adventure', name: 'Kletterwald Vulkanpark Mayen', region: 'Mayen', coords: [50.3266, 7.2247], duration: 240, price: 26, desc: 'Hochseilgarten, viele Parcours' },
+  { id: 'camp-ring', cat: 'schlafen', name: 'Camping am Nürburgring (1 Nacht)', region: 'Müllenbach', coords: [50.3450, 6.9050], duration: 0, price: 22, desc: '2,5 km vom Ring, Tel. 02692 224' },
+  { id: 'cochem-essen', cat: 'essen', name: 'Weinstube Zum Kapuziner Cochem', region: 'Cochem', coords: [50.1456, 7.1672], duration: 120, price: 40, desc: 'Mosel-Restaurant mit Blick' },
+  { id: 'kingstons', cat: 'party', name: 'Kingstons Club Cochem', region: 'Cochem', coords: [50.1447, 7.1685], duration: 180, price: 25, desc: 'Der Club in Cochem' },
+  { id: 'reichsburg', cat: 'kultur', name: 'Reichsburg Cochem', region: 'Cochem', coords: [50.1469, 7.1631], duration: 90, price: 8, desc: 'Burg-Besichtigung über der Mosel' },
+  { id: 'bauchladen-cochem', cat: 'party', name: 'Bauchladen-Tour Cochem Altstadt', region: 'Cochem', coords: [50.1454, 7.1660], duration: 120, price: 15, desc: 'Bräutigam verkauft Shots an Passanten' },
+  { id: 'ash', cat: 'essen', name: 'The ASH Steakhouse Stuttgart', region: 'Stuttgart', coords: [48.7758, 9.1773], duration: 120, price: 50, desc: 'Premium Steakhouse Bolzstraße' },
+  { id: 'perkins', cat: 'party', name: 'Perkins Park Stuttgart', region: 'Stuttgart', coords: [48.8068, 9.1681], duration: 240, price: 20, desc: 'Funk, Soul, Charts Club' },
+  { id: 'proton', cat: 'party', name: 'Proton Club Stuttgart', region: 'Stuttgart', coords: [48.7787, 9.1761], duration: 240, price: 20, desc: 'Elektro Club Königstraße' },
+  { id: 'theo', cat: 'party', name: 'Theodor-Heuss-Straße Bar-Hopping', region: 'Stuttgart', coords: [48.7775, 9.1750], duration: 180, price: 45, desc: 'Stuttgarter Partymeile' },
+  { id: 'rafting', cat: 'adventure', name: 'Murgtal Rafting + BBQ', region: 'Forbach', coords: [48.6857, 8.3597], duration: 270, price: 99, desc: 'Rafting, Flussbett, Abseilen inkl. BBQ' },
+  { id: 'buggy', cat: 'adventure', name: 'Buggy Offroad Schenkenzell', region: 'Schenkenzell', coords: [48.3225, 8.3475], duration: 120, price: 200, desc: '80-PS Side-by-Side selbst fahren' },
+  { id: 'schloessle', cat: 'schlafen', name: 'Schlössle Schenkenzell (1 Nacht)', region: 'Schenkenzell', coords: [48.3225, 8.3475], duration: 0, price: 90, desc: 'Gruppenunterkunft mit Sauna und Beefer-Grill' },
+  { id: 'kartion', cat: 'auto', name: 'Kartion Gärtringen exklusiv', region: 'Gärtringen', coords: [48.6406, 8.9039], duration: 90, price: 70, desc: '600 m Indoor-Kartbahn, exklusiv buchbar' },
+  { id: 'lasertag', cat: 'adventure', name: 'Lasertag Stuttgart', region: 'Stuttgart', coords: [48.7860, 9.1850], duration: 90, price: 25, desc: 'Indoor-Lasertag in der City' },
+  { id: 'paintball', cat: 'adventure', name: 'Paintball Outdoor', region: 'Stuttgart-Umland', coords: [48.8200, 9.3000], duration: 180, price: 60, desc: '500 Bälle inklusive' },
+  { id: 'escape', cat: 'adventure', name: 'Escape Room Stuttgart', region: 'Stuttgart', coords: [48.7765, 9.1800], duration: 75, price: 30, desc: 'Rätsel mit der Gruppe knacken' },
+  { id: 'area47', cat: 'adventure', name: 'Area47 Ötztal Tageskarte', region: 'Ötztal', coords: [47.2306, 10.8389], duration: 480, price: 49, desc: 'Wasserpark, Cliff Jumps, Megaswing - aber weit weg!' },
+  { id: 'area47-camp', cat: 'schlafen', name: 'Area47 Camp Übernachtung', region: 'Ötztal', coords: [47.2306, 10.8389], duration: 0, price: 28, desc: 'Camping direkt am Area47' },
+  { id: 'b-shirts', cat: 'braeutigam', name: 'T-Shirts mit Team-Logo drucken', region: 'Vorbereitung', coords: null, duration: 0, price: 25, desc: 'Mind. 2 Wochen Vorlauf bei Spreadshirt' },
+  { id: 'b-bauchladen', cat: 'braeutigam', name: 'Bauchladen befüllen', region: 'Vorbereitung', coords: null, duration: 0, price: 15, desc: 'Shots, Süßes, Mini-Geschenke, Aufkleber' },
+  { id: 'b-overall', cat: 'braeutigam', name: 'Bräutigam-Overall + Helm', region: 'Vorbereitung', coords: null, duration: 0, price: 10, desc: 'Weißer Overall mit Renn-Aufklebern' },
+  { id: 'b-shots', cat: 'braeutigam', name: 'Mini-Vodka 24er-Pack', region: 'Vorbereitung', coords: null, duration: 0, price: 8, desc: 'Für Bauchladen und Spiele' },
+  { id: 'b-krone', cat: 'braeutigam', name: 'Bräutigam-Sash + Krone', region: 'Vorbereitung', coords: null, duration: 0, price: 5, desc: 'JGA-Shop oder Amazon' },
+  { id: 'b-polaroid', cat: 'braeutigam', name: 'Polaroid-Kamera + Filme', region: 'Vorbereitung', coords: null, duration: 0, price: 12, desc: 'Reicht für ca. 30 Fotos' },
+  { id: 'g-reifen', cat: 'braeutigam', name: 'Spiel: Reifenwechsel auf Zeit', region: 'Vor Ort', coords: null, duration: 30, price: 0, desc: 'Reifen mitbringen, Bräutigam mit Augenbinde' },
+  { id: 'g-boxenstopp', cat: 'braeutigam', name: 'Spiel: Boxenstopp-Challenge', region: 'Vor Ort', coords: null, duration: 20, price: 0, desc: 'Mini-Parcours mit Hütchen, pro Patzer ein Shot' },
+  { id: 'g-schnaps', cat: 'braeutigam', name: 'Spiel: Schnaps blind verkosten', region: 'Vor Ort', coords: null, duration: 30, price: 5, desc: '5 Schnäpse blind erraten' },
+  { id: 'g-karaoke', cat: 'braeutigam', name: 'Pflicht-Song Karaoke', region: 'Vor Ort', coords: null, duration: 10, price: 0, desc: 'Bräutigam singt vorgegebenen Song' },
+  { id: 'm-bauchladen', cat: 'braeutigam', name: 'Mission: Bauchladen ausverkaufen', region: 'Vor Ort', coords: null, duration: 0, price: 0, desc: 'Läuft parallel zu anderen Aktivitäten' },
+  { id: 'm-foto', cat: 'braeutigam', name: 'Mission: 15 Foto-Aufgaben', region: 'Vor Ort', coords: null, duration: 0, price: 0, desc: 'z. B. mit Polizist, vor Burg, Headstand' }
+];
+
+const PLACES = [
+  { name: 'Stuttgart', coords: [48.7758, 9.1829] },
+  { name: 'Stuttgart-Vaihingen', coords: [48.7280, 9.1075] },
+  { name: 'Esslingen', coords: [48.7407, 9.3066] },
+  { name: 'Sindelfingen', coords: [48.7088, 9.0086] },
+  { name: 'Böblingen', coords: [48.6849, 9.0148] },
+  { name: 'Gärtringen', coords: [48.6406, 8.9039] },
+  { name: 'Tübingen', coords: [48.5216, 9.0576] },
+  { name: 'Heilbronn', coords: [49.1427, 9.2109] },
+  { name: 'Pforzheim', coords: [48.8924, 8.6946] },
+  { name: 'Baden-Baden', coords: [48.7606, 8.2398] },
+  { name: 'Karlsruhe', coords: [49.0069, 8.4037] },
+  { name: 'Heidelberg', coords: [49.3988, 8.6724] },
+  { name: 'Mannheim', coords: [49.4875, 8.4660] },
+  { name: 'Forbach (Schwarzwald)', coords: [48.6857, 8.3597] },
+  { name: 'Freudenstadt', coords: [48.4636, 8.4126] },
+  { name: 'Triberg', coords: [48.1297, 8.2317] },
+  { name: 'Schenkenzell', coords: [48.3225, 8.3475] },
+  { name: 'Schluchsee', coords: [47.8170, 8.1639] },
+  { name: 'Freiburg', coords: [47.9990, 7.8421] },
+  { name: 'Titisee', coords: [47.9072, 8.1497] },
+  { name: 'Nürburgring', coords: [50.3356, 6.9475] },
+  { name: 'Nürburg', coords: [50.3334, 6.9491] },
+  { name: 'Adenau', coords: [50.3829, 6.9419] },
+  { name: 'Müllenbach (Eifel)', coords: [50.3504, 6.9131] },
+  { name: 'Mayen', coords: [50.3266, 7.2247] },
+  { name: 'Daun', coords: [50.1958, 6.8311] },
+  { name: 'Berlingen (Eifel)', coords: [50.0989, 6.6275] },
+  { name: 'Cochem', coords: [50.1432, 7.1660] },
+  { name: 'Koblenz', coords: [50.3569, 7.5890] },
+  { name: 'Trier', coords: [49.7596, 6.6442] },
+  { name: 'Bernkastel-Kues', coords: [49.9170, 7.0728] },
+  { name: 'München', coords: [48.1351, 11.5820] },
+  { name: 'Frankfurt am Main', coords: [50.1109, 8.6821] },
+  { name: 'Köln', coords: [50.9375, 6.9603] },
+  { name: 'Mainz', coords: [50.0026, 8.2730] },
+  { name: 'Wiesbaden', coords: [50.0826, 8.2493] },
+  { name: 'Saarbrücken', coords: [49.2401, 6.9969] },
+  { name: 'Hockenheimring', coords: [49.3289, 8.5575] },
+  { name: 'Europa-Park Rust', coords: [48.2667, 7.7167] },
+  { name: 'Bilster Berg', coords: [51.8408, 9.1750] },
+  { name: 'Bodensee (Konstanz)', coords: [47.6603, 9.1755] },
+  { name: 'Innsbruck', coords: [47.2692, 11.4041] },
+  { name: 'Ötztal (Roppen)', coords: [47.2306, 10.8389] },
+  { name: 'Sölden', coords: [46.9692, 11.0078] },
+  { name: 'Salzburg', coords: [47.8095, 13.0550] }
+];
+
+// ============= Helpers =============
+function haversine(c1, c2) {
+  if (!c1 || !c2) return 0;
+  const R = 6371;
+  const dLat = (c2[0] - c1[0]) * Math.PI / 180;
+  const dLng = (c2[1] - c1[1]) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(c1[0] * Math.PI / 180) * Math.cos(c2[0] * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 1.35;
+}
+function travelMin(km) { return Math.ceil((km / 85) * 60); }
+function fmtDur(min) {
+  if (min === 0) return '—';
+  if (min < 60) return Math.round(min) + ' min';
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return m === 0 ? h + ' h' : h + ' h ' + m + ' min';
+}
+function fmtTime(m) {
+  if (m >= 24 * 60) {
+    const d = Math.floor(m / (24 * 60));
+    const r = m % (24 * 60);
+    return '+' + d + 'd ' + String(Math.floor(r / 60)).padStart(2, '0') + ':' + String(r % 60).padStart(2, '0');
+  }
+  return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+}
+function uid() { return Math.random().toString(36).substring(2, 10); }
+function generateRoomCode() {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+function getTimeSlot(item) {
+  const name = (item.name || '').toLowerCase();
+  if (item.cat === 'transport') return 0;
+  if (item.cat === 'schlafen') return 9;
+  if (item.cat === 'party') return 8;
+  if (item.cat === 'essen') {
+    if (name.includes('brunch') || name.includes('frühstück') || name.includes('fruehstueck')) return 1;
+    if (name.includes('mittag') || name.includes('lunch')) return 4;
+    return 6;
+  }
+  if (item.cat === 'auto') return 2;
+  if (item.cat === 'adventure') return 3;
+  if (item.cat === 'kultur') return 3;
+  if (item.cat === 'chill') return 5;
+  if (item.cat === 'braeutigam') {
+    if (name.startsWith('spiel')) return 5;
+    return 0;
+  }
+  return 5;
+}
+function optimizeDay(items, startCoords) {
+  if (items.length <= 1) return [...items];
+  const slots = {};
+  items.forEach(it => {
+    const s = getTimeSlot(it);
+    if (!slots[s]) slots[s] = [];
+    slots[s].push(it);
+  });
+  const sortedKeys = Object.keys(slots).map(Number).sort((a, b) => a - b);
+  const result = [];
+  let lastCoords = startCoords;
+  for (const k of sortedKeys) {
+    const bucket = slots[k];
+    const noCoords = bucket.filter(i => !i.coords);
+    const withCoords = bucket.filter(i => i.coords);
+    while (withCoords.length > 0) {
+      let nearest = 0;
+      let best = Infinity;
+      for (let i = 0; i < withCoords.length; i++) {
+        const d = haversine(lastCoords, withCoords[i].coords);
+        if (d < best) { best = d; nearest = i; }
+      }
+      const pick = withCoords.splice(nearest, 1)[0];
+      result.push(pick);
+      lastCoords = pick.coords;
+    }
+    result.push(...noCoords);
+  }
+  return result;
+}
+function optimizeWholePlan(plan, startCoords) {
+  let lastCoords = startCoords;
+  const result = {};
+  for (const day of DAYS) {
+    const ordered = optimizeDay(plan[day], lastCoords);
+    result[day] = ordered;
+    for (let i = ordered.length - 1; i >= 0; i--) {
+      if (ordered[i].coords) { lastCoords = ordered[i].coords; break; }
+    }
+  }
+  return result;
+}
+
+// ============= App-Root mit Raum-System =============
+export default function App() {
+  const [roomCode, setRoomCode] = useState(null);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    // 1. URL Hash prüfen
+    const hash = window.location.hash.replace('#', '').trim().toUpperCase();
+    if (hash && /^[A-Z0-9]{6}$/.test(hash)) {
+      setRoomCode(hash);
+      setChecking(false);
+      return;
+    }
+    // 2. Letzten Raum aus localStorage
+    const last = localStorage.getItem('jga-last-room');
+    if (last && /^[A-Z0-9]{6}$/.test(last)) {
+      setRoomCode(last);
+      window.location.hash = last;
+    }
+    setChecking(false);
+  }, []);
+
+  const enterRoom = (code) => {
+    setRoomCode(code);
+    window.location.hash = code;
+    localStorage.setItem('jga-last-room', code);
+  };
+  const leaveRoom = () => {
+    setRoomCode(null);
+    window.location.hash = '';
+    localStorage.removeItem('jga-last-room');
+  };
+
+  if (checking) {
+    return <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center text-sm text-zinc-500">Lädt…</div>;
+  }
+  if (!roomCode) return <RoomScreen onEnter={enterRoom} />;
+  return <JGAPlaner roomCode={roomCode} onLeave={leaveRoom} />;
+}
+
+// ============= Raum-Screen =============
+function RoomScreen({ onEnter }) {
+  const [joinCode, setJoinCode] = useState('');
+  const [error, setError] = useState('');
+
+  const createRoom = async () => {
+    const code = generateRoomCode();
+    setError('');
+    try {
+      const { error: insertError } = await supabase
+        .from('jga_plans')
+        .insert({ room_code: code, data: { budget: 400, groupSize: 8, startLocation: { name: 'Stuttgart', coords: STUTTGART }, plan: { sat: [], sun: [] }, hiddenIds: [] } });
+      if (insertError && insertError.code !== '23505') throw insertError;
+      onEnter(code);
+    } catch (e) {
+      setError('Raum konnte nicht erstellt werden: ' + (e.message || e));
+    }
+  };
+  const joinRoom = async () => {
+    const code = joinCode.trim().toUpperCase();
+    if (!/^[A-Z0-9]{6}$/.test(code)) {
+      setError('Code muss 6 Buchstaben/Zahlen sein');
+      return;
+    }
+    setError('');
+    try {
+      const { data, error: selectError } = await supabase
+        .from('jga_plans')
+        .select('room_code')
+        .eq('room_code', code)
+        .maybeSingle();
+      if (selectError) throw selectError;
+      if (!data) {
+        setError('Raum nicht gefunden. Frag deine Freunde nach dem Code.');
+        return;
+      }
+      onEnter(code);
+    } catch (e) {
+      setError('Fehler: ' + (e.message || e));
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex items-center justify-center p-4">
+      <div className="max-w-md w-full space-y-6">
+        <div className="text-center">
+          <h1 className="text-3xl font-medium">JGA-Planer</h1>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">22.–23. August 2026</p>
+        </div>
+
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 space-y-3">
+          <h2 className="font-medium">Neuen Raum erstellen</h2>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">Erzeugt einen 6-stelligen Code. Teil den per WhatsApp mit deinen Freunden.</p>
+          <button onClick={createRoom} className="w-full py-2.5 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-md text-sm font-medium hover:bg-zinc-700 dark:hover:bg-zinc-300">
+            Raum erstellen
+          </button>
+        </div>
+
+        <div className="text-center text-xs text-zinc-400">ODER</div>
+
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 space-y-3">
+          <h2 className="font-medium">Bestehendem Raum beitreten</h2>
+          <input
+            type="text"
+            value={joinCode}
+            onChange={e => setJoinCode(e.target.value.toUpperCase())}
+            onKeyDown={e => e.key === 'Enter' && joinRoom()}
+            placeholder="z. B. AB12CD"
+            maxLength="6"
+            className="w-full px-3 py-2.5 text-center text-lg font-mono tracking-widest bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md focus:outline-none focus:border-zinc-400"
+          />
+          <button onClick={joinRoom} disabled={joinCode.length !== 6} className="w-full py-2.5 border border-zinc-300 dark:border-zinc-700 rounded-md text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40">
+            Beitreten
+          </button>
+        </div>
+
+        {error && <p className="text-sm text-red-600 dark:text-red-400 text-center">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+// ============= Haupt-Planer =============
+function JGAPlaner({ roomCode, onLeave }) {
+  const [loaded, setLoaded] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('connecting');
+  const [budget, setBudget] = useState(400);
+  const [groupSize, setGroupSize] = useState(8);
+  const [startLocation, setStartLocation] = useState({ name: 'Stuttgart', coords: STUTTGART });
+  const [plan, setPlan] = useState({ sat: [], sun: [] });
+  const [activeDay, setActiveDay] = useState('sat');
+  const [filterCat, setFilterCat] = useState('all');
+  const [search, setSearch] = useState('');
+  const [dragInfo, setDragInfo] = useState(null);
+  const [dragOverTab, setDragOverTab] = useState(null);
+  const [dragOverIdx, setDragOverIdx] = useState(null);
+  const [showCustomModal, setShowCustomModal] = useState(false);
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [hiddenIds, setHiddenIds] = useState([]);
+  const [showHidden, setShowHidden] = useState(false);
+  const [previousPlan, setPreviousPlan] = useState(null);
+  const [showShareToast, setShowShareToast] = useState(false);
+
+  const isApplyingRemoteUpdate = useRef(false);
+  const lastSavedJson = useRef('');
+
+  // Initial load
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('jga_plans')
+          .select('data')
+          .eq('room_code', roomCode)
+          .maybeSingle();
+        if (cancelled) return;
+        if (error) throw error;
+        if (data && data.data) {
+          const d = data.data;
+          if (typeof d.budget === 'number') setBudget(d.budget);
+          if (typeof d.groupSize === 'number') setGroupSize(d.groupSize);
+          if (d.startLocation && d.startLocation.coords) setStartLocation(d.startLocation);
+          if (d.plan && d.plan.sat && d.plan.sun) setPlan(d.plan);
+          if (Array.isArray(d.hiddenIds)) setHiddenIds(d.hiddenIds);
+          lastSavedJson.current = JSON.stringify(d);
+        }
+        setSyncStatus('connected');
+        setLoaded(true);
+      } catch (e) {
+        console.error(e);
+        setSyncStatus('error');
+        setLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [roomCode]);
+
+  // Realtime-Subscription für Live-Updates der anderen
+  useEffect(() => {
+    if (!loaded) return;
+    const channel = supabase
+      .channel(`room-${roomCode}`)
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'jga_plans', filter: `room_code=eq.${roomCode}` },
+        (payload) => {
+          const d = payload.new && payload.new.data;
+          if (!d) return;
+          const remoteJson = JSON.stringify(d);
+          if (remoteJson === lastSavedJson.current) return; // eigener Save
+          isApplyingRemoteUpdate.current = true;
+          if (typeof d.budget === 'number') setBudget(d.budget);
+          if (typeof d.groupSize === 'number') setGroupSize(d.groupSize);
+          if (d.startLocation && d.startLocation.coords) setStartLocation(d.startLocation);
+          if (d.plan && d.plan.sat && d.plan.sun) setPlan(d.plan);
+          if (Array.isArray(d.hiddenIds)) setHiddenIds(d.hiddenIds);
+          lastSavedJson.current = remoteJson;
+          setTimeout(() => { isApplyingRemoteUpdate.current = false; }, 100);
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') setSyncStatus('connected');
+        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setSyncStatus('error');
+      });
+    return () => { supabase.removeChannel(channel); };
+  }, [loaded, roomCode]);
+
+  // Auto-Save mit Debounce
+  useEffect(() => {
+    if (!loaded || isApplyingRemoteUpdate.current) return;
+    const payload = { budget, groupSize, startLocation, plan, hiddenIds };
+    const json = JSON.stringify(payload);
+    if (json === lastSavedJson.current) return;
+    const timer = setTimeout(async () => {
+      try {
+        setSyncStatus('saving');
+        const { error } = await supabase
+          .from('jga_plans')
+          .upsert({ room_code: roomCode, data: payload, updated_at: new Date().toISOString() }, { onConflict: 'room_code' });
+        if (error) throw error;
+        lastSavedJson.current = json;
+        setSyncStatus('connected');
+      } catch (e) {
+        console.error(e);
+        setSyncStatus('error');
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [budget, groupSize, startLocation, plan, hiddenIds, loaded, roomCode]);
+
+  const enriched = useMemo(() => {
+    const result = { sat: [], sun: [] };
+    let lastCoords = startLocation.coords;
+    DAYS.forEach(day => {
+      let cur = DAY_START_TIME[day];
+      plan[day].forEach(item => {
+        const hasLoc = item.coords && item.coords.length === 2;
+        const km = hasLoc ? haversine(lastCoords, item.coords) : 0;
+        const tm = hasLoc ? travelMin(km) : 0;
+        const start = cur + tm;
+        const isTrans = item.cat === 'transport';
+        const end = start + (isTrans ? 0 : item.duration);
+        result[day].push({ ...item, travelKm: Math.round(km), travelMin: tm, startMin: start, endMin: end, hasLoc });
+        cur = end;
+        if (hasLoc) lastCoords = item.coords;
+      });
+    });
+    return result;
+  }, [plan, startLocation]);
+
+  const totalSpent = useMemo(() => {
+    let t = 0;
+    DAYS.forEach(d => plan[d].forEach(i => { if (!(i.cat === 'braeutigam' && i.done)) t += i.price; }));
+    return t;
+  }, [plan]);
+
+  const remaining = budget - totalSpent;
+  const pct = Math.min(100, Math.max(0, (totalSpent / Math.max(budget, 1)) * 100));
+
+  const filteredActivities = useMemo(() => {
+    return ACTIVITIES.filter(a => {
+      const isHidden = hiddenIds.includes(a.id);
+      if (isHidden && !showHidden) return false;
+      if (filterCat !== 'all' && a.cat !== filterCat) return false;
+      if (search) {
+        const s = search.toLowerCase();
+        if (!a.name.toLowerCase().includes(s) &&
+            !(a.region || '').toLowerCase().includes(s) &&
+            !a.desc.toLowerCase().includes(s)) return false;
+      }
+      return true;
+    });
+  }, [filterCat, search, hiddenIds, showHidden]);
+
+  const addActivity = (act) => {
+    setPlan(prev => ({ ...prev, [activeDay]: [...prev[activeDay], { ...act, instanceId: uid(), status: 'offen', done: false }] }));
+  };
+  const removeItem = (day, instanceId) => setPlan(prev => ({ ...prev, [day]: prev[day].filter(i => i.instanceId !== instanceId) }));
+  const moveItem = (day, instanceId, dir) => {
+    setPlan(prev => {
+      const arr = [...prev[day]];
+      const idx = arr.findIndex(i => i.instanceId === instanceId);
+      const ni = idx + dir;
+      if (ni < 0 || ni >= arr.length) return prev;
+      [arr[idx], arr[ni]] = [arr[ni], arr[idx]];
+      return { ...prev, [day]: arr };
+    });
+  };
+  const moveToDay = (fromDay, toDay, instanceId) => {
+    if (fromDay === toDay) return;
+    setPlan(prev => {
+      const item = prev[fromDay].find(i => i.instanceId === instanceId);
+      if (!item) return prev;
+      return { ...prev, [fromDay]: prev[fromDay].filter(i => i.instanceId !== instanceId), [toDay]: [...prev[toDay], item] };
+    });
+    setActiveDay(toDay);
+  };
+  const cycleStatus = (day, instanceId) => setPlan(prev => ({
+    ...prev,
+    [day]: prev[day].map(i => {
+      if (i.instanceId !== instanceId) return i;
+      const cur = i.status || 'offen';
+      return { ...i, status: STATUS_LIST[(STATUS_LIST.indexOf(cur) + 1) % STATUS_LIST.length] };
+    })
+  }));
+  const toggleDone = (day, instanceId) => setPlan(prev => ({
+    ...prev,
+    [day]: prev[day].map(i => i.instanceId === instanceId ? { ...i, done: !i.done } : i)
+  }));
+  const resetPlan = () => { if (confirm('Wirklich kompletten Plan löschen? Auch für deine Freunde!')) setPlan({ sat: [], sun: [] }); };
+
+  const optimizePlan = () => {
+    const hasItems = plan.sat.length + plan.sun.length > 0;
+    if (!hasItems) return;
+    setPreviousPlan(plan);
+    setPlan(optimizeWholePlan(plan, startLocation.coords));
+  };
+  const undoOptimize = () => { if (previousPlan) { setPlan(previousPlan); setPreviousPlan(null); } };
+
+  const hideActivity = (id) => { setHiddenIds(prev => prev.includes(id) ? prev : [...prev, id]); };
+  const unhideActivity = (id) => { setHiddenIds(prev => prev.filter(x => x !== id)); };
+  const unhideAll = () => { setHiddenIds([]); setShowHidden(false); };
+
+  const onDragEnd = () => { setDragInfo(null); setDragOverTab(null); setDragOverIdx(null); };
+  const dropOnItem = (targetIdx) => {
+    if (!dragInfo || dragInfo.day !== activeDay) { onDragEnd(); return; }
+    setPlan(prev => {
+      const arr = [...prev[activeDay]];
+      const fromIdx = arr.findIndex(i => i.instanceId === dragInfo.instanceId);
+      if (fromIdx < 0 || fromIdx === targetIdx) return prev;
+      const [moved] = arr.splice(fromIdx, 1);
+      arr.splice(targetIdx > fromIdx ? targetIdx - 1 : targetIdx, 0, moved);
+      return { ...prev, [activeDay]: arr };
+    });
+    onDragEnd();
+  };
+
+  const copyShareLink = async () => {
+    const url = `${window.location.origin}${window.location.pathname}#${roomCode}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setShowShareToast(true);
+      setTimeout(() => setShowShareToast(false), 2000);
+    } catch {
+      prompt('Link kopieren:', url);
+    }
+  };
+
+  const dayItems = enriched[activeDay];
+  const dayCost = plan[activeDay].reduce((s, i) => s + (i.cat === 'braeutigam' && i.done ? 0 : i.price), 0);
+  const dayEnd = dayItems.length > 0 ? dayItems[dayItems.length - 1].endMin : null;
+  const dayKm = dayItems.reduce((s, i) => s + i.travelKm, 0);
+
+  const remColor = remaining < 0 ? 'text-red-600 dark:text-red-400' : (remaining < budget * 0.2 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400');
+  const barColor = pct > 100 ? 'bg-red-500' : (pct > 80 ? 'bg-amber-500' : 'bg-emerald-500');
+
+  if (!loaded) {
+    return <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-500 flex items-center justify-center text-sm">Plan wird geladen…</div>;
+  }
+
+  return (
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
+      <div className="max-w-3xl mx-auto p-4 space-y-5">
+
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <div className="flex items-baseline gap-3 flex-wrap">
+              <h1 className="text-2xl font-medium">JGA-Planer</h1>
+              <span className="text-sm text-zinc-500 dark:text-zinc-400">22.–23. August 2026</span>
+            </div>
+            <div className="flex items-center gap-2 mt-1 text-xs">
+              <button onClick={copyShareLink} className="flex items-center gap-1 px-2 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-md hover:bg-zinc-200 dark:hover:bg-zinc-700">
+                <Users size={12} />
+                <span className="font-mono font-medium">{roomCode}</span>
+                <Copy size={11} className="text-zinc-400" />
+              </button>
+              <span className={`flex items-center gap-1 ${
+                syncStatus === 'connected' ? 'text-emerald-600 dark:text-emerald-400' :
+                syncStatus === 'saving' ? 'text-zinc-500' :
+                syncStatus === 'error' ? 'text-red-600 dark:text-red-400' : 'text-zinc-500'
+              }`}>
+                {syncStatus === 'connected' && <><Wifi size={11} /> Live</>}
+                {syncStatus === 'saving' && <>… speichert</>}
+                {syncStatus === 'error' && <><WifiOff size={11} /> offline</>}
+                {syncStatus === 'connecting' && <>… verbindet</>}
+              </span>
+            </div>
+          </div>
+          <button onClick={onLeave} className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 flex items-center gap-1">
+            <LogOut size={12} /> Raum verlassen
+          </button>
+        </div>
+
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 space-y-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">Budget / Person</p>
+              <div className="flex items-baseline gap-1">
+                <input type="number" value={budget} onChange={e => setBudget(Math.max(0, parseInt(e.target.value) || 0))} className="w-full text-xl font-medium bg-transparent border-0 p-0 focus:outline-none text-zinc-900 dark:text-zinc-100" min="0" step="50" />
+                <span className="text-sm text-zinc-400">€</span>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">Gruppe</p>
+              <div className="flex items-baseline gap-1">
+                <input type="number" value={groupSize} onChange={e => setGroupSize(Math.max(1, parseInt(e.target.value) || 1))} className="w-full text-xl font-medium bg-transparent border-0 p-0 focus:outline-none text-zinc-900 dark:text-zinc-100" min="1" />
+                <span className="text-sm text-zinc-400">Pers.</span>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">Ausgegeben</p>
+              <p className="text-xl font-medium">{Math.round(totalSpent)} €</p>
+            </div>
+            <div>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">Verbleibend</p>
+              <p className={`text-xl font-medium ${remColor}`}>{Math.round(remaining)} €</p>
+            </div>
+          </div>
+          <div className="h-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+            <div className={`h-full ${barColor} transition-all`} style={{ width: pct + '%' }} />
+          </div>
+          <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+            <button onClick={() => setShowStartPicker(true)} className="flex items-center gap-1 hover:text-zinc-900 dark:hover:text-zinc-100">
+              <MapPin size={12} />
+              Start am Samstag: {startLocation.name}
+            </button>
+            <span>Gruppen-Total: {Math.round(totalSpent * groupSize)} €</span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          {DAYS.map(day => {
+            const cost = plan[day].reduce((s, i) => s + (i.cat === 'braeutigam' && i.done ? 0 : i.price), 0);
+            const isOver = dragOverTab === day && dragInfo && dragInfo.day !== day;
+            return (
+              <button key={day} onClick={() => setActiveDay(day)}
+                onDragOver={(e) => { if (dragInfo && dragInfo.day !== day) { e.preventDefault(); setDragOverTab(day); } }}
+                onDragLeave={() => setDragOverTab(null)}
+                onDrop={() => { if (dragInfo) moveToDay(dragInfo.day, day, dragInfo.instanceId); onDragEnd(); }}
+                className={`text-left p-3 rounded-lg border transition-all ${activeDay === day ? 'bg-white dark:bg-zinc-900 border-zinc-900 dark:border-zinc-100' : 'bg-zinc-100 dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-800'} ${isOver ? 'ring-2 ring-amber-500 border-amber-500' : ''}`}>
+                <div className="text-sm font-medium">{DAY_SHORT[day]}</div>
+                <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{plan[day].length} {plan[day].length === 1 ? 'Aktivität' : 'Aktivitäten'} · {cost} €</div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div>
+          {dayItems.length === 0 ? (
+            <div className="bg-white dark:bg-zinc-900 border border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl p-8 text-center">
+              <ArrowDown className="mx-auto mb-2 text-zinc-400" size={24} />
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">Noch leer für {DAY_LABEL[activeDay]}. Unten Aktivitäten auswählen.</p>
+            </div>
+          ) : (
+            <div className="space-y-0">
+              {dayItems.map((item, idx) => {
+                const Cat = CATS[item.cat];
+                const showTravel = item.hasLoc && item.travelKm > 0;
+                const travelWarn = item.travelMin > 120;
+                const fromLabel = idx === 0 ? startLocation.name : 'letzte Station';
+                return (
+                  <React.Fragment key={item.instanceId}>
+                    {showTravel && (
+                      <div className={`flex items-center gap-2 px-3 py-1.5 ml-12 text-xs ${travelWarn ? 'text-amber-600 dark:text-amber-400' : 'text-zinc-500 dark:text-zinc-400'}`}>
+                        <ArrowDown size={12} /><Car size={12} />
+                        <span>{idx === 0 && <span>von {fromLabel}: </span>}{item.travelKm} km · {fmtDur(item.travelMin)}</span>
+                        {travelWarn && <AlertTriangle size={12} />}
+                      </div>
+                    )}
+                    {dragInfo && dragInfo.day === activeDay && dragOverIdx === idx && dragInfo.instanceId !== item.instanceId && (
+                      <div className="h-0.5 bg-amber-500 my-1 rounded-full" />
+                    )}
+                    <div draggable
+                      onDragStart={() => setDragInfo({ day: activeDay, instanceId: item.instanceId })}
+                      onDragEnd={onDragEnd}
+                      onDragOver={(e) => { if (dragInfo) { e.preventDefault(); setDragOverIdx(idx); } }}
+                      onDrop={() => dropOnItem(idx)}
+                      className={`bg-white dark:bg-zinc-900 border rounded-lg p-3 flex gap-3 cursor-grab active:cursor-grabbing ${dragInfo && dragInfo.instanceId === item.instanceId ? 'opacity-40 border-zinc-300 dark:border-zinc-700' : 'border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'} ${item.cat === 'braeutigam' && item.done ? 'opacity-60' : ''}`}>
+                      <div className="flex-shrink-0 w-12 text-center">
+                        {item.hasLoc ? (
+                          <>
+                            <div className="text-sm font-medium leading-tight">{fmtTime(item.startMin)}</div>
+                            {item.duration > 0 && <div className="text-[10px] text-zinc-400 leading-tight mt-0.5">{fmtTime(item.endMin)}</div>}
+                          </>
+                        ) : (
+                          <Clock size={14} className="text-zinc-400 mx-auto mt-1" />
+                        )}
+                      </div>
+                      <div className={`flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center ${Cat.badge}`}>
+                        <Cat.Icon size={18} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm font-medium leading-snug mb-1 ${item.cat === 'braeutigam' && item.done ? 'line-through' : ''}`}>{item.name}</p>
+                        <div className="flex items-center gap-2 flex-wrap text-xs text-zinc-500 dark:text-zinc-400">
+                          {item.duration > 0 && <span>{fmtDur(item.duration)}</span>}
+                          {item.duration > 0 && <span>·</span>}
+                          <span className="font-medium text-zinc-700 dark:text-zinc-300">{item.price} €/P</span>
+                          {groupSize > 1 && <span>· {item.price * groupSize} € ges.</span>}
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                          {item.cat === 'braeutigam' ? (
+                            <button onClick={() => toggleDone(activeDay, item.instanceId)}
+                              className={`text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 ${item.done ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'}`}>
+                              {item.done ? <><Check size={10} /> Erledigt</> : 'Offen'}
+                            </button>
+                          ) : (
+                            <button onClick={() => cycleStatus(activeDay, item.instanceId)}
+                              className={`text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wide ${STATUS_CLASS[item.status || 'offen']}`}
+                              title="Klick zum Wechseln">
+                              {item.status || 'offen'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex-shrink-0 flex flex-col gap-1">
+                        <button onClick={() => moveItem(activeDay, item.instanceId, -1)} disabled={idx === 0} className="w-7 h-7 rounded-md border border-zinc-200 dark:border-zinc-800 flex items-center justify-center text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30"><ChevronUp size={14} /></button>
+                        <button onClick={() => moveItem(activeDay, item.instanceId, 1)} disabled={idx === dayItems.length - 1} className="w-7 h-7 rounded-md border border-zinc-200 dark:border-zinc-800 flex items-center justify-center text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30"><ChevronDown size={14} /></button>
+                        <button onClick={() => removeItem(activeDay, item.instanceId)} className="w-7 h-7 rounded-md border border-zinc-200 dark:border-zinc-800 flex items-center justify-center text-zinc-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950 dark:hover:text-red-400"><X size={14} /></button>
+                      </div>
+                    </div>
+                  </React.Fragment>
+                );
+              })}
+              <div className="bg-zinc-100 dark:bg-zinc-900/50 rounded-lg px-4 py-2.5 mt-3 flex justify-between items-center flex-wrap gap-2 text-xs">
+                <div><span className="text-zinc-500 dark:text-zinc-400">Ende: </span><span className="font-medium">{dayEnd !== null ? fmtTime(dayEnd) : '—'}</span></div>
+                <div><span className="text-zinc-500 dark:text-zinc-400">Kosten: </span><span className="font-medium">{dayCost} €/P</span></div>
+                <div><span className="text-zinc-500 dark:text-zinc-400">Fahrt: </span><span className="font-medium">{dayKm} km</span></div>
+              </div>
+              <div className="flex justify-between items-center mt-2 gap-2 flex-wrap">
+                <div className="flex gap-2">
+                  <button onClick={optimizePlan} className="text-xs px-3 py-1.5 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-md hover:bg-zinc-700 dark:hover:bg-zinc-300 flex items-center gap-1.5 font-medium">
+                    <Sparkles size={12} /> Plan optimieren
+                  </button>
+                  {previousPlan && (
+                    <button onClick={undoOptimize} className="text-xs px-3 py-1.5 border border-zinc-300 dark:border-zinc-700 rounded-md hover:bg-white dark:hover:bg-zinc-800 flex items-center gap-1.5">
+                      <Undo2 size={12} /> Rückgängig
+                    </button>
+                  )}
+                </div>
+                <button onClick={resetPlan} className="text-xs text-zinc-500 hover:text-red-600 dark:hover:text-red-400 flex items-center gap-1">
+                  <RotateCcw size={12} /> Plan zurücksetzen
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <h2 className="text-lg font-medium">Bibliothek</h2>
+            <button onClick={() => setShowCustomModal(true)} className="text-sm px-3 py-1.5 border border-zinc-300 dark:border-zinc-700 rounded-md hover:bg-white dark:hover:bg-zinc-800 inline-flex items-center gap-1.5">
+              <Plus size={14} /> Eigene Aktivität
+            </button>
+          </div>
+          <div className="relative mb-3">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+            <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Suchen (Ring, Cochem, Steak…)"
+              className="w-full pl-9 pr-3 py-2 text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md focus:outline-none focus:border-zinc-400" />
+          </div>
+          <div className="flex gap-1.5 mb-3 flex-wrap">
+            <button onClick={() => setFilterCat('all')} className={`text-xs px-3 py-1 rounded-full border ${filterCat === 'all' ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 border-zinc-900 dark:border-zinc-100' : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>Alle</button>
+            {Object.entries(CATS).map(([key, c]) => {
+              const Ic = c.Icon;
+              return (
+                <button key={key} onClick={() => setFilterCat(key)} className={`text-xs px-3 py-1 rounded-full border inline-flex items-center gap-1 ${filterCat === key ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 border-zinc-900 dark:border-zinc-100' : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>
+                  <Ic size={12} />{c.label}
+                </button>
+              );
+            })}
+          </div>
+          {hiddenIds.length > 0 && (
+            <div className="flex items-center justify-between mb-3 px-3 py-2 bg-zinc-100 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs">
+              <span className="text-zinc-600 dark:text-zinc-400 flex items-center gap-1.5">
+                <EyeOff size={12} />{hiddenIds.length} {hiddenIds.length === 1 ? 'Aktivität' : 'Aktivitäten'} ausgeblendet
+              </span>
+              <div className="flex gap-3">
+                <button onClick={() => setShowHidden(s => !s)} className="text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 underline flex items-center gap-1">
+                  {showHidden ? <><EyeOff size={11} /> Verstecken</> : <><Eye size={11} /> Anzeigen</>}
+                </button>
+                <button onClick={unhideAll} className="text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 underline">Alle wiederherstellen</button>
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {filteredActivities.map(a => {
+              const Cat = CATS[a.cat];
+              const isHidden = hiddenIds.includes(a.id);
+              return (
+                <div key={a.id} className={`relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 flex flex-col gap-2 ${isHidden ? 'opacity-50' : ''}`}>
+                  <button onClick={() => isHidden ? unhideActivity(a.id) : hideActivity(a.id)} className="absolute top-2 right-2 w-6 h-6 rounded-md text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 flex items-center justify-center" title={isHidden ? 'Wieder einblenden' : 'Aus Bibliothek ausblenden'}>
+                    {isHidden ? <Undo2 size={12} /> : <X size={12} />}
+                  </button>
+                  <div className="flex gap-2 items-start pr-6">
+                    <div className={`flex-shrink-0 w-8 h-8 rounded-md flex items-center justify-center ${Cat.badge}`}><Cat.Icon size={16} /></div>
+                    <p className="text-sm font-medium leading-snug flex-1">{a.name}</p>
+                  </div>
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400 flex gap-1.5 flex-wrap items-center">
+                    <span>{Cat.label}</span><span>·</span><span>{a.region}</span>
+                    {a.duration > 0 && <><span>·</span><span>{fmtDur(a.duration)}</span></>}
+                  </div>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">{a.desc}</p>
+                  <div className="flex items-center justify-between gap-2 mt-1">
+                    <span className="text-sm font-medium">
+                      {a.price > 0 ? <>{a.price} €<span className="text-xs text-zinc-400 font-normal">/P</span></> : <span className="text-zinc-400 font-normal text-xs">gratis</span>}
+                    </span>
+                    <button onClick={() => addActivity(a)} disabled={isHidden} className="text-xs px-2.5 py-1 border border-zinc-300 dark:border-zinc-700 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 inline-flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed">
+                      <Plus size={12} /> Zu {DAY_SHORT[activeDay].split(' ')[0]}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {filteredActivities.length === 0 && (
+            <div className="text-center py-8 text-sm text-zinc-500 dark:text-zinc-400">
+              Nichts gefunden. <button onClick={() => setShowCustomModal(true)} className="underline">Eigene anlegen?</button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {showCustomModal && <CustomActivityModal onClose={() => setShowCustomModal(false)} onSave={addActivity} activeDay={activeDay} />}
+      {showStartPicker && <PlaceModal title="Start am Samstag" subtitle="Wo seid ihr Samstag früh?" initial={startLocation.name} onClose={() => setShowStartPicker(false)} onSelect={(p) => { setStartLocation(p); setShowStartPicker(false); }} />}
+
+      {showShareToast && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
+          <Check size={14} /> Link kopiert
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CustomActivityModal({ onClose, onSave, activeDay }) {
+  const [name, setName] = useState('');
+  const [cat, setCat] = useState('adventure');
+  const [duration, setDuration] = useState(60);
+  const [price, setPrice] = useState(20);
+  const [desc, setDesc] = useState('');
+  const [placeQuery, setPlaceQuery] = useState('');
+  const [selectedPlace, setSelectedPlace] = useState(null);
+  const matches = useMemo(() => {
+    if (!placeQuery) return [];
+    const q = placeQuery.toLowerCase();
+    return PLACES.filter(p => p.name.toLowerCase().includes(q)).slice(0, 6);
+  }, [placeQuery]);
+  const canSave = name.trim().length > 0;
+  const submit = () => {
+    if (!canSave) return;
+    onSave({
+      id: 'custom-' + uid(),
+      cat,
+      name: name.trim(),
+      region: selectedPlace ? selectedPlace.name : (placeQuery.trim() || 'Eigene'),
+      coords: selectedPlace ? selectedPlace.coords : null,
+      duration: Math.max(0, duration),
+      price: Math.max(0, price),
+      desc: desc.trim() || 'Eigene Aktivität'
+    });
+    onClose();
+  };
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
+      <div className="bg-white dark:bg-zinc-900 w-full sm:max-w-md rounded-t-2xl sm:rounded-xl border border-zinc-200 dark:border-zinc-800 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-zinc-200 dark:border-zinc-800 sticky top-0 bg-white dark:bg-zinc-900">
+          <h2 className="text-lg font-medium">Eigene Aktivität</h2>
+          <button onClick={onClose} className="w-8 h-8 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center"><X size={16} /></button>
+        </div>
+        <div className="p-4 space-y-4">
+          <div>
+            <label className="text-xs text-zinc-500 dark:text-zinc-400 mb-1 block">Name</label>
+            <input type="text" value={name} onChange={e => setName(e.target.value)} autoFocus placeholder="z. B. Heißluftballon Mosel"
+              className="w-full px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md focus:outline-none focus:border-zinc-400" />
+          </div>
+          <div>
+            <label className="text-xs text-zinc-500 dark:text-zinc-400 mb-1 block">Standort (für Fahrzeitberechnung)</label>
+            <div className="relative">
+              <MapPin size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+              <input type="text" value={placeQuery} onChange={e => { setPlaceQuery(e.target.value); setSelectedPlace(null); }} placeholder="Ort suchen…"
+                className="w-full pl-9 pr-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md focus:outline-none focus:border-zinc-400" />
+            </div>
+            {selectedPlace && (
+              <div className="mt-2 text-xs bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 px-3 py-2 rounded-md flex items-center gap-2">
+                <Check size={12} /> {selectedPlace.name} – Fahrzeit wird berechnet
+              </div>
+            )}
+            {!selectedPlace && matches.length > 0 && (
+              <div className="mt-2 border border-zinc-200 dark:border-zinc-700 rounded-md overflow-hidden">
+                {matches.map(p => (
+                  <button key={p.name} onClick={() => { setSelectedPlace(p); setPlaceQuery(p.name); }} className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 border-b last:border-0 border-zinc-100 dark:border-zinc-800 flex items-center gap-2">
+                    <MapPin size={12} className="text-zinc-400" />{p.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            {!selectedPlace && placeQuery && matches.length === 0 && (
+              <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">Kein Ort gefunden – Aktivität wird ohne Fahrzeitberechnung gespeichert.</p>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-zinc-500 dark:text-zinc-400 mb-1 block">Dauer (Min)</label>
+              <input type="number" value={duration} onChange={e => setDuration(parseInt(e.target.value) || 0)} min="0" step="15"
+                className="w-full px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md focus:outline-none focus:border-zinc-400" />
+            </div>
+            <div>
+              <label className="text-xs text-zinc-500 dark:text-zinc-400 mb-1 block">Preis €/P</label>
+              <input type="number" value={price} onChange={e => setPrice(parseInt(e.target.value) || 0)} min="0" step="5"
+                className="w-full px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md focus:outline-none focus:border-zinc-400" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-zinc-500 dark:text-zinc-400 mb-1 block">Kategorie</label>
+            <div className="grid grid-cols-3 gap-1.5">
+              {Object.entries(CATS).map(([key, c]) => {
+                const Ic = c.Icon;
+                return (
+                  <button key={key} onClick={() => setCat(key)} className={`text-xs px-2 py-1.5 rounded-md border inline-flex items-center justify-center gap-1 ${cat === key ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 border-zinc-900 dark:border-zinc-100' : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400'}`}>
+                    <Ic size={12} />{c.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-zinc-500 dark:text-zinc-400 mb-1 block">Notiz</label>
+            <textarea value={desc} onChange={e => setDesc(e.target.value)} rows="2" placeholder="Kontakt, Link, Hinweis…"
+              className="w-full px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md focus:outline-none focus:border-zinc-400 resize-none" />
+          </div>
+        </div>
+        <div className="flex gap-2 p-4 border-t border-zinc-200 dark:border-zinc-800 sticky bottom-0 bg-white dark:bg-zinc-900">
+          <button onClick={onClose} className="flex-1 py-2 text-sm border border-zinc-300 dark:border-zinc-700 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">Abbrechen</button>
+          <button onClick={submit} disabled={!canSave} className="flex-1 py-2 text-sm bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-md hover:bg-zinc-700 dark:hover:bg-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed">
+            Zu {DAY_SHORT[activeDay].split(' ')[0]} hinzufügen
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlaceModal({ title, subtitle, initial, onClose, onSelect }) {
+  const [q, setQ] = useState(initial || '');
+  const matches = useMemo(() => {
+    if (!q) return PLACES.slice(0, 10);
+    const s = q.toLowerCase();
+    return PLACES.filter(p => p.name.toLowerCase().includes(s)).slice(0, 10);
+  }, [q]);
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
+      <div className="bg-white dark:bg-zinc-900 w-full sm:max-w-md rounded-t-2xl sm:rounded-xl border border-zinc-200 dark:border-zinc-800 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-zinc-200 dark:border-zinc-800">
+          <div>
+            <h2 className="text-lg font-medium">{title}</h2>
+            {subtitle && <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{subtitle}</p>}
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center"><X size={16} /></button>
+        </div>
+        <div className="p-4">
+          <div className="relative mb-3">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+            <input type="text" value={q} onChange={e => setQ(e.target.value)} autoFocus
+              className="w-full pl-9 pr-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md focus:outline-none focus:border-zinc-400" placeholder="Ort suchen…" />
+          </div>
+          <div className="space-y-1">
+            {matches.map(p => (
+              <button key={p.name} onClick={() => onSelect(p)} className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md flex items-center gap-2">
+                <MapPin size={12} className="text-zinc-400" />{p.name}
+              </button>
+            ))}
+            {matches.length === 0 && <p className="text-xs text-zinc-500 dark:text-zinc-400 text-center py-4">Nichts gefunden.</p>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

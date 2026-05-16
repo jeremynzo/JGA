@@ -3,9 +3,11 @@ import {
   Car, Truck, Tent, Music, Plus, ChevronUp, ChevronDown, X, Search,
   Mountain, Building2, Beer, PartyPopper, Utensils, ArrowDown, AlertTriangle,
   MapPin, Check, RotateCcw, Clock, Sparkles, EyeOff, Eye, Undo2,
-  Users, LogOut, Copy, Wifi, WifiOff, Loader2, Globe
+  Users, LogOut, Copy, Wifi, WifiOff, Loader2, Globe, Map as MapIcon
 } from 'lucide-react';
 import { supabase } from './supabase';
+import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap } from 'react-leaflet';
+import L from 'leaflet';
 
 // ============= Konstanten =============
 const STUTTGART = [48.7758, 9.1829];
@@ -216,6 +218,119 @@ async function searchPlacesOnline(query, signal) {
   }
 }
 
+// ============= Map-Komponente =============
+function makeNumberIcon(label, color) {
+  return L.divIcon({
+    html: `<div style="background:${color};color:white;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:13px;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.35);font-family:-apple-system,BlinkMacSystemFont,sans-serif;">${label}</div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+    popupAnchor: [0, -15],
+    className: 'jga-marker'
+  });
+}
+
+function FitBoundsHelper({ points }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!points || points.length === 0) return;
+    if (points.length === 1) {
+      map.setView(points[0], 10);
+      return;
+    }
+    const bounds = L.latLngBounds(points);
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 11 });
+  }, [points, map]);
+  return null;
+}
+
+function RouteMap({ plan, startLocation }) {
+  const items = useMemo(() => {
+    const list = [];
+    let n = 1;
+    plan.sat.forEach(i => { if (i.coords) list.push({ ...i, num: n++, day: 'sat' }); });
+    plan.sun.forEach(i => { if (i.coords) list.push({ ...i, num: n++, day: 'sun' }); });
+    return list;
+  }, [plan]);
+
+  const satRoute = useMemo(() => {
+    const pts = [startLocation.coords];
+    plan.sat.forEach(i => { if (i.coords) pts.push(i.coords); });
+    return pts.length >= 2 ? pts : [];
+  }, [plan.sat, startLocation]);
+
+  const sunRoute = useMemo(() => {
+    let last = startLocation.coords;
+    for (let i = plan.sat.length - 1; i >= 0; i--) {
+      if (plan.sat[i].coords) { last = plan.sat[i].coords; break; }
+    }
+    const pts = [last];
+    plan.sun.forEach(i => { if (i.coords) pts.push(i.coords); });
+    return pts.length >= 2 ? pts : [];
+  }, [plan.sun, plan.sat, startLocation]);
+
+  const allCoords = useMemo(() => {
+    const c = [startLocation.coords];
+    items.forEach(i => c.push(i.coords));
+    return c;
+  }, [items, startLocation]);
+
+  const satCount = plan.sat.filter(i => i.coords).length;
+  const sunCount = plan.sun.filter(i => i.coords).length;
+
+  if (items.length === 0) {
+    return (
+      <div className="bg-white dark:bg-zinc-900 border border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl p-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
+        Füge Aktivitäten mit Standort hinzu, dann erscheint hier eure Route auf der Karte.
+      </div>
+    );
+  }
+
+  const startIconObj = makeNumberIcon('★', '#6b7280');
+
+  return (
+    <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-800">
+      <MapContainer
+        center={startLocation.coords}
+        zoom={6}
+        scrollWheelZoom={false}
+        style={{ height: 380, width: '100%', zIndex: 0 }}
+      >
+        <TileLayer
+          attribution='&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        {satRoute.length >= 2 && (
+          <Polyline positions={satRoute} pathOptions={{ color: '#7c3aed', weight: 3, opacity: 0.75, dashArray: '6,8' }} />
+        )}
+        {sunRoute.length >= 2 && (
+          <Polyline positions={sunRoute} pathOptions={{ color: '#059669', weight: 3, opacity: 0.75, dashArray: '6,8' }} />
+        )}
+        <Marker position={startLocation.coords} icon={startIconObj}>
+          <Popup>Start: <strong>{startLocation.name}</strong></Popup>
+        </Marker>
+        {items.map(i => (
+          <Marker
+            key={i.instanceId}
+            position={i.coords}
+            icon={makeNumberIcon(i.num, i.day === 'sat' ? '#7c3aed' : '#059669')}
+          >
+            <Popup>
+              <strong>{i.name}</strong><br />
+              {i.day === 'sat' ? 'Samstag' : 'Sonntag'} · {i.price} €/P
+            </Popup>
+          </Marker>
+        ))}
+        <FitBoundsHelper points={allCoords} />
+      </MapContainer>
+      <div className="bg-zinc-100 dark:bg-zinc-900/50 px-4 py-2 flex items-center gap-4 text-xs flex-wrap text-zinc-600 dark:text-zinc-400">
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-zinc-500"></span>Start</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full" style={{background:'#7c3aed'}}></span>Samstag ({satCount})</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full" style={{background:'#059669'}}></span>Sonntag ({sunCount})</span>
+      </div>
+    </div>
+  );
+}
+
 function getTimeSlot(item) {
   const name = (item.name || '').toLowerCase();
   if (item.cat === 'transport') return 0;
@@ -419,8 +534,10 @@ function JGAPlaner({ roomCode, onLeave }) {
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [hiddenIds, setHiddenIds] = useState([]);
   const [showHidden, setShowHidden] = useState(false);
+  const [showMap, setShowMap] = useState(true);
   const [previousPlan, setPreviousPlan] = useState(null);
   const [showShareToast, setShowShareToast] = useState(false);
+  const [mapVisible, setMapVisible] = useState(false);
 
   const isApplyingRemoteUpdate = useRef(false);
   const lastSavedJson = useRef('');
@@ -707,6 +824,18 @@ function JGAPlaner({ roomCode, onLeave }) {
             </button>
             <span>Gruppen-Total: {Math.round(totalSpent * groupSize)} €</span>
           </div>
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-medium text-zinc-600 dark:text-zinc-400 flex items-center gap-1.5">
+              <MapIcon size={14} /> Routen-Überblick
+            </h2>
+            <button onClick={() => setShowMap(s => !s)} className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 flex items-center gap-1">
+              {showMap ? <><EyeOff size={11} /> Ausblenden</> : <><Eye size={11} /> Anzeigen</>}
+            </button>
+          </div>
+          {showMap && <RouteMap plan={plan} startLocation={startLocation} />}
         </div>
 
         <div className="grid grid-cols-2 gap-2">

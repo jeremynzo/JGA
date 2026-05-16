@@ -3,7 +3,8 @@ import {
   Car, Truck, Tent, Music, Plus, ChevronUp, ChevronDown, X, Search,
   Mountain, Building2, Beer, PartyPopper, Utensils, ArrowDown, AlertTriangle,
   MapPin, Check, RotateCcw, Clock, Sparkles, EyeOff, Eye, Undo2,
-  Users, LogOut, Copy, Wifi, WifiOff, Loader2, Globe, Map as MapIcon
+  Users, LogOut, Copy, Wifi, WifiOff, Loader2, Globe, Map as MapIcon,
+  ThumbsUp, User as UserIcon, Pencil
 } from 'lucide-react';
 import { supabase } from './supabase';
 import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap } from 'react-leaflet';
@@ -513,26 +514,41 @@ function optimizeWholePlan(plan, startCoords) {
 // ============= App-Root mit Raum-System =============
 export default function App() {
   const [roomCode, setRoomCode] = useState(null);
+  const [userName, setUserNameState] = useState('');
   const [checking, setChecking] = useState(true);
+  const [pendingHashCode, setPendingHashCode] = useState('');
+
+  const setUserName = (name) => {
+    const trimmed = (name || '').trim().slice(0, 24);
+    setUserNameState(trimmed);
+    if (trimmed) localStorage.setItem('jga-user-name', trimmed);
+    else localStorage.removeItem('jga-user-name');
+  };
 
   useEffect(() => {
-    // 1. URL Hash prüfen
+    const storedName = localStorage.getItem('jga-user-name') || '';
+    setUserNameState(storedName.slice(0, 24));
+
     const hash = window.location.hash.replace('#', '').trim().toUpperCase();
     if (hash && /^[A-Z0-9]{6}$/.test(hash)) {
-      setRoomCode(hash);
+      setPendingHashCode(hash);
+      if (storedName) setRoomCode(hash);
       setChecking(false);
       return;
     }
-    // 2. Letzten Raum aus localStorage
     const last = localStorage.getItem('jga-last-room');
     if (last && /^[A-Z0-9]{6}$/.test(last)) {
-      setRoomCode(last);
-      window.location.hash = last;
+      setPendingHashCode(last);
+      if (storedName) {
+        setRoomCode(last);
+        window.location.hash = last;
+      }
     }
     setChecking(false);
   }, []);
 
-  const enterRoom = (code) => {
+  const enterRoom = (code, name) => {
+    if (name) setUserName(name);
     setRoomCode(code);
     window.location.hash = code;
     localStorage.setItem('jga-last-room', code);
@@ -546,29 +562,35 @@ export default function App() {
   if (checking) {
     return <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center text-sm text-zinc-500">Lädt…</div>;
   }
-  if (!roomCode) return <RoomScreen onEnter={enterRoom} />;
-  return <JGAPlaner roomCode={roomCode} onLeave={leaveRoom} />;
+  if (!roomCode) return <RoomScreen onEnter={enterRoom} initialName={userName} initialJoinCode={pendingHashCode} />;
+  return <JGAPlaner roomCode={roomCode} onLeave={leaveRoom} userName={userName} setUserName={setUserName} />;
 }
 
 // ============= Raum-Screen =============
-function RoomScreen({ onEnter }) {
-  const [joinCode, setJoinCode] = useState('');
+function RoomScreen({ onEnter, initialName = '', initialJoinCode = '' }) {
+  const [name, setName] = useState(initialName);
+  const [joinCode, setJoinCode] = useState(initialJoinCode);
   const [error, setError] = useState('');
 
+  const cleanName = name.trim().slice(0, 24);
+  const canAct = cleanName.length >= 2;
+
   const createRoom = async () => {
+    if (!canAct) { setError('Bitte gib zuerst deinen Namen ein.'); return; }
     const code = generateRoomCode();
     setError('');
     try {
       const { error: insertError } = await supabase
         .from('jga_plans')
-        .insert({ room_code: code, data: { budget: 400, groupSize: 8, startLocation: { name: 'Stuttgart', coords: STUTTGART }, plan: { sat: [], sun: [] }, hiddenIds: [] } });
+        .insert({ room_code: code, data: { budget: 400, groupSize: 8, startLocation: { name: 'Stuttgart', coords: STUTTGART }, plan: { sat: [], sun: [] }, hiddenIds: [], customActivities: [], votes: {} } });
       if (insertError && insertError.code !== '23505') throw insertError;
-      onEnter(code);
+      onEnter(code, cleanName);
     } catch (e) {
       setError('Raum konnte nicht erstellt werden: ' + (e.message || e));
     }
   };
   const joinRoom = async () => {
+    if (!canAct) { setError('Bitte gib zuerst deinen Namen ein.'); return; }
     const code = joinCode.trim().toUpperCase();
     if (!/^[A-Z0-9]{6}$/.test(code)) {
       setError('Code muss 6 Buchstaben/Zahlen sein');
@@ -586,7 +608,7 @@ function RoomScreen({ onEnter }) {
         setError('Raum nicht gefunden. Frag deine Freunde nach dem Code.');
         return;
       }
-      onEnter(code);
+      onEnter(code, cleanName);
     } catch (e) {
       setError('Fehler: ' + (e.message || e));
     }
@@ -594,16 +616,30 @@ function RoomScreen({ onEnter }) {
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex items-center justify-center p-4">
-      <div className="max-w-md w-full space-y-6">
+      <div className="max-w-md w-full space-y-5">
         <div className="text-center">
           <h1 className="text-3xl font-medium">JGA-Planer</h1>
           <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">22.–23. August 2026</p>
         </div>
 
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 space-y-2">
+          <label className="text-xs text-zinc-500 dark:text-zinc-400 block">Dein Name</label>
+          <input
+            type="text"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="z. B. Max"
+            maxLength="24"
+            autoFocus={!initialName}
+            className="w-full px-3 py-2.5 text-base bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md focus:outline-none focus:border-zinc-400"
+          />
+          <p className="text-[11px] text-zinc-400">So sehen deine Freunde, wer für welche Aktivität abgestimmt hat.</p>
+        </div>
+
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 space-y-3">
           <h2 className="font-medium">Neuen Raum erstellen</h2>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">Erzeugt einen 6-stelligen Code. Teil den per WhatsApp mit deinen Freunden.</p>
-          <button onClick={createRoom} className="w-full py-2.5 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-md text-sm font-medium hover:bg-zinc-700 dark:hover:bg-zinc-300">
+          <button onClick={createRoom} disabled={!canAct} className="w-full py-2.5 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-md text-sm font-medium hover:bg-zinc-700 dark:hover:bg-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed">
             Raum erstellen
           </button>
         </div>
@@ -621,7 +657,7 @@ function RoomScreen({ onEnter }) {
             maxLength="6"
             className="w-full px-3 py-2.5 text-center text-lg font-mono tracking-widest bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md focus:outline-none focus:border-zinc-400"
           />
-          <button onClick={joinRoom} disabled={joinCode.length !== 6} className="w-full py-2.5 border border-zinc-300 dark:border-zinc-700 rounded-md text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40">
+          <button onClick={joinRoom} disabled={joinCode.length !== 6 || !canAct} className="w-full py-2.5 border border-zinc-300 dark:border-zinc-700 rounded-md text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed">
             Beitreten
           </button>
         </div>
@@ -633,7 +669,7 @@ function RoomScreen({ onEnter }) {
 }
 
 // ============= Haupt-Planer =============
-function JGAPlaner({ roomCode, onLeave }) {
+function JGAPlaner({ roomCode, onLeave, userName, setUserName }) {
   const [loaded, setLoaded] = useState(false);
   const [syncStatus, setSyncStatus] = useState('connecting');
   const [budget, setBudget] = useState(400);
@@ -655,6 +691,9 @@ function JGAPlaner({ roomCode, onLeave }) {
   const [showShareToast, setShowShareToast] = useState(false);
   const [mapVisible, setMapVisible] = useState(false);
   const [customActivities, setCustomActivities] = useState([]);
+  const [votes, setVotes] = useState({});
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(userName || '');
   const [nearbySuggestions, setNearbySuggestions] = useState([]);
   const [loadingNearby, setLoadingNearby] = useState(false);
   const [nearbyError, setNearbyError] = useState(false);
@@ -683,6 +722,7 @@ function JGAPlaner({ roomCode, onLeave }) {
           if (d.plan && d.plan.sat && d.plan.sun) setPlan(d.plan);
           if (Array.isArray(d.hiddenIds)) setHiddenIds(d.hiddenIds);
           if (Array.isArray(d.customActivities)) setCustomActivities(d.customActivities);
+          if (d.votes && typeof d.votes === 'object' && !Array.isArray(d.votes)) setVotes(d.votes);
           lastSavedJson.current = JSON.stringify(d);
         }
         setSyncStatus('connected');
@@ -715,6 +755,7 @@ function JGAPlaner({ roomCode, onLeave }) {
           if (d.plan && d.plan.sat && d.plan.sun) setPlan(d.plan);
           if (Array.isArray(d.hiddenIds)) setHiddenIds(d.hiddenIds);
           if (Array.isArray(d.customActivities)) setCustomActivities(d.customActivities);
+          if (d.votes && typeof d.votes === 'object' && !Array.isArray(d.votes)) setVotes(d.votes);
           lastSavedJson.current = remoteJson;
           setTimeout(() => { isApplyingRemoteUpdate.current = false; }, 100);
         }
@@ -729,7 +770,7 @@ function JGAPlaner({ roomCode, onLeave }) {
   // Auto-Save mit Debounce
   useEffect(() => {
     if (!loaded || isApplyingRemoteUpdate.current) return;
-    const payload = { budget, groupSize, startLocation, plan, hiddenIds, customActivities };
+    const payload = { budget, groupSize, startLocation, plan, hiddenIds, customActivities, votes };
     const json = JSON.stringify(payload);
     if (json === lastSavedJson.current) return;
     const timer = setTimeout(async () => {
@@ -747,7 +788,7 @@ function JGAPlaner({ roomCode, onLeave }) {
       }
     }, 600);
     return () => clearTimeout(timer);
-  }, [budget, groupSize, startLocation, plan, hiddenIds, customActivities, loaded, roomCode]);
+  }, [budget, groupSize, startLocation, plan, hiddenIds, customActivities, votes, loaded, roomCode]);
 
   const enriched = useMemo(() => {
     const result = { sat: [], sun: [] };
@@ -784,7 +825,7 @@ function JGAPlaner({ roomCode, onLeave }) {
   );
 
   const filteredActivities = useMemo(() => {
-    return allLibraryActivities.filter(a => {
+    const filtered = allLibraryActivities.filter(a => {
       const isHidden = hiddenIds.includes(a.id);
       if (isHidden && !showHidden) return false;
       if (filterCat !== 'all' && a.cat !== filterCat) return false;
@@ -796,7 +837,12 @@ function JGAPlaner({ roomCode, onLeave }) {
       }
       return true;
     });
-  }, [allLibraryActivities, filterCat, search, hiddenIds, showHidden]);
+    // Stabil nach Stimmen sortieren (absteigend) – Index als Tiebreaker für deterministische Reihenfolge
+    return filtered
+      .map((a, idx) => ({ a, idx, voteCount: (Array.isArray(votes[a.id]) ? votes[a.id].length : 0) }))
+      .sort((x, y) => (y.voteCount - x.voteCount) || (x.idx - y.idx))
+      .map(({ a }) => a);
+  }, [allLibraryActivities, filterCat, search, hiddenIds, showHidden, votes]);
 
   const lastPlannedItem = useMemo(() => {
     for (let i = plan.sun.length - 1; i >= 0; i--) {
@@ -871,6 +917,27 @@ function JGAPlaner({ roomCode, onLeave }) {
     const { _distanceKm, source, isCustom, ...rest } = suggestion;
     addCustomToLibrary(rest);
     addActivity(rest);
+  };
+
+  const toggleVote = (activityId) => {
+    if (!userName) return;
+    setVotes(prev => {
+      const current = Array.isArray(prev[activityId]) ? prev[activityId] : [];
+      const already = current.includes(userName);
+      const next = already ? current.filter(n => n !== userName) : [...current, userName];
+      const out = { ...prev };
+      if (next.length === 0) delete out[activityId];
+      else out[activityId] = next;
+      return out;
+    });
+  };
+
+  const saveName = () => {
+    const cleaned = (nameDraft || '').trim().slice(0, 24);
+    if (cleaned.length >= 2) {
+      setUserName(cleaned);
+      setEditingName(false);
+    }
   };
   const removeItem = (day, instanceId) => setPlan(prev => ({ ...prev, [day]: prev[day].filter(i => i.instanceId !== instanceId) }));
   const moveItem = (day, instanceId, dir) => {
@@ -965,12 +1032,33 @@ function JGAPlaner({ roomCode, onLeave }) {
               <h1 className="text-2xl font-medium">JGA-Planer</h1>
               <span className="text-sm text-zinc-500 dark:text-zinc-400">22.–23. August 2026</span>
             </div>
-            <div className="flex items-center gap-2 mt-1 text-xs">
+            <div className="flex items-center gap-2 mt-1 text-xs flex-wrap">
               <button onClick={copyShareLink} className="flex items-center gap-1 px-2 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-md hover:bg-zinc-200 dark:hover:bg-zinc-700">
                 <Users size={12} />
                 <span className="font-mono font-medium">{roomCode}</span>
                 <Copy size={11} className="text-zinc-400" />
               </button>
+              {editingName ? (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={nameDraft}
+                    onChange={e => setNameDraft(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') { setEditingName(false); setNameDraft(userName || ''); } }}
+                    maxLength="24"
+                    autoFocus
+                    placeholder="Dein Name"
+                    className="px-2 py-1 text-xs bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-md focus:outline-none focus:border-zinc-400 w-28"
+                  />
+                  <button onClick={saveName} className="px-2 py-1 text-xs bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-md">OK</button>
+                </div>
+              ) : (
+                <button onClick={() => { setNameDraft(userName || ''); setEditingName(true); }} className="flex items-center gap-1 px-2 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-md hover:bg-zinc-200 dark:hover:bg-zinc-700" title="Name ändern">
+                  <UserIcon size={12} />
+                  <span className="font-medium">{userName || 'Anonym'}</span>
+                  <Pencil size={10} className="text-zinc-400" />
+                </button>
+              )}
               <span className={`flex items-center gap-1 ${
                 syncStatus === 'connected' ? 'text-emerald-600 dark:text-emerald-400' :
                 syncStatus === 'saving' ? 'text-zinc-500' :
@@ -1266,14 +1354,30 @@ function JGAPlaner({ roomCode, onLeave }) {
                     {a.duration > 0 && <><span>·</span><span>{fmtDur(a.duration)}</span></>}
                   </div>
                   <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">{a.desc}</p>
-                  <div className="flex items-center justify-between gap-2 mt-1">
-                    <span className="text-sm font-medium">
-                      {a.price > 0 ? <>{a.price} €<span className="text-xs text-zinc-400 font-normal">/P</span></> : <span className="text-zinc-400 font-normal text-xs">gratis</span>}
-                    </span>
-                    <button onClick={() => addActivity(a)} disabled={isHidden} className="text-xs px-2.5 py-1 border border-zinc-300 dark:border-zinc-700 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 inline-flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed">
-                      <Plus size={12} /> Zu {DAY_SHORT[activeDay].split(' ')[0]}
-                    </button>
-                  </div>
+                  {(() => {
+                    const voters = Array.isArray(votes[a.id]) ? votes[a.id] : [];
+                    const iVoted = userName && voters.includes(userName);
+                    return (
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        <span className="text-sm font-medium">
+                          {a.price > 0 ? <>{a.price} €<span className="text-xs text-zinc-400 font-normal">/P</span></> : <span className="text-zinc-400 font-normal text-xs">gratis</span>}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => toggleVote(a.id)}
+                            disabled={!userName}
+                            title={voters.length > 0 ? `Stimmen: ${voters.join(', ')}` : 'Noch keine Stimmen'}
+                            className={`text-xs px-2 py-1 rounded-md inline-flex items-center gap-1 border ${iVoted ? 'bg-violet-100 text-violet-700 border-violet-300 dark:bg-violet-950 dark:text-violet-300 dark:border-violet-700' : 'border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'} disabled:opacity-30 disabled:cursor-not-allowed`}>
+                            <ThumbsUp size={11} className={iVoted ? 'fill-current' : ''} />
+                            <span className="font-medium">{voters.length}</span>
+                          </button>
+                          <button onClick={() => addActivity(a)} disabled={isHidden} className="text-xs px-2.5 py-1 border border-zinc-300 dark:border-zinc-700 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 inline-flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed">
+                            <Plus size={12} /> Zu {DAY_SHORT[activeDay].split(' ')[0]}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}

@@ -103,7 +103,6 @@ cp .env.example .env
 npm run dev
 ```
 
-
 Browser öffnet automatisch auf http://localhost:5173
 
 ## Sicherheitshinweis

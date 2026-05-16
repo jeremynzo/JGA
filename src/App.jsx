@@ -199,6 +199,87 @@ function shortenDisplayName(name) {
   return `${main}, ${last}`;
 }
 
+// OSM-Tags auf JGA-Kategorien mappen
+function osmTagsToCategory(tags) {
+  if (!tags) return null;
+  if (tags.amenity === 'nightclub' || tags.club === 'nightclub' || tags.amenity === 'disco') return 'party';
+  if (tags.amenity === 'bar' || tags.amenity === 'pub' || tags.amenity === 'biergarten') return 'chill';
+  if (tags.amenity === 'cafe' || tags.amenity === 'ice_cream') return 'chill';
+  if (tags.amenity === 'restaurant' || tags.amenity === 'fast_food' || tags.amenity === 'food_court') return 'essen';
+  if (tags.sport === 'karting' || tags.sport === 'motor' || tags.leisure === 'motorsports_centre') return 'auto';
+  if (tags.tourism === 'museum') return 'kultur';
+  if (tags.historic) return 'kultur';
+  if (tags.tourism === 'attraction' || tags.tourism === 'viewpoint' || tags.tourism === 'gallery') return 'kultur';
+  if (tags.tourism === 'theme_park' || tags.leisure === 'water_park' || tags.leisure === 'adventure_park') return 'adventure';
+  if (tags.leisure === 'sports_centre' || tags.leisure === 'escape_game' || tags.leisure === 'bowling_alley' || tags.leisure === 'miniature_golf' || tags.leisure === 'climbing') return 'adventure';
+  return null;
+}
+
+function estimateDuration(cat) {
+  if (cat === 'essen') return 90;
+  if (cat === 'party') return 180;
+  if (cat === 'chill') return 90;
+  if (cat === 'kultur') return 60;
+  if (cat === 'adventure') return 120;
+  if (cat === 'auto') return 60;
+  return 60;
+}
+
+async function fetchNearbyPOIs(lat, lng, radiusKm, signal) {
+  if (typeof lat !== 'number' || typeof lng !== 'number') return [];
+  const r = Math.round((radiusKm || 30) * 1000);
+  const query = `[out:json][timeout:20];
+(
+  node["amenity"~"^(bar|pub|biergarten|nightclub|restaurant|fast_food|cafe|food_court|ice_cream)$"]["name"](around:${r},${lat},${lng});
+  node["tourism"~"^(museum|attraction|viewpoint|theme_park|gallery)$"]["name"](around:${r},${lat},${lng});
+  node["leisure"~"^(water_park|adventure_park|sports_centre|escape_game|bowling_alley|miniature_golf|climbing)$"]["name"](around:${r},${lat},${lng});
+  node["sport"~"^(karting|motor)$"]["name"](around:${r},${lat},${lng});
+  node["historic"~"^(castle|monument|memorial|ruins|fort)$"]["name"](around:${r},${lat},${lng});
+);
+out 100;`;
+  try {
+    const res = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'data=' + encodeURIComponent(query),
+      signal,
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const seen = new Set();
+    const results = [];
+    for (const el of (data.elements || [])) {
+      const name = el.tags && el.tags.name;
+      if (!name) continue;
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      const cat = osmTagsToCategory(el.tags);
+      if (!cat) continue;
+      const coords = [el.lat, el.lon];
+      const dist = haversine([lat, lng], coords);
+      seen.add(key);
+      const region = el.tags['addr:city'] || el.tags['addr:town'] || el.tags['addr:village'] || el.tags['addr:suburb'] || '';
+      results.push({
+        id: 'osm-' + el.id,
+        cat,
+        name,
+        region: region || `${dist.toFixed(0)} km entfernt`,
+        coords,
+        duration: estimateDuration(cat),
+        price: 0,
+        desc: `OSM-Vorschlag · ${dist.toFixed(1)} km vom letzten Stopp`,
+        source: 'osm',
+        _distanceKm: dist,
+      });
+    }
+    results.sort((a, b) => a._distanceKm - b._distanceKm);
+    return results;
+  } catch (e) {
+    if (e.name !== 'AbortError') console.error('Overpass error:', e);
+    return [];
+  }
+}
+
 async function searchPlacesOnline(query, signal) {
   if (!query || query.length < 3) return [];
   const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=6&accept-language=de&countrycodes=de,at,ch,it,fr,li,lu,nl,be,cz`;
@@ -573,6 +654,11 @@ function JGAPlaner({ roomCode, onLeave }) {
   const [previousPlan, setPreviousPlan] = useState(null);
   const [showShareToast, setShowShareToast] = useState(false);
   const [mapVisible, setMapVisible] = useState(false);
+  const [customActivities, setCustomActivities] = useState([]);
+  const [nearbySuggestions, setNearbySuggestions] = useState([]);
+  const [loadingNearby, setLoadingNearby] = useState(false);
+  const [nearbyError, setNearbyError] = useState(false);
+  const [showNearby, setShowNearby] = useState(true);
 
   const isApplyingRemoteUpdate = useRef(false);
   const lastSavedJson = useRef('');
@@ -596,6 +682,7 @@ function JGAPlaner({ roomCode, onLeave }) {
           if (d.startLocation && d.startLocation.coords) setStartLocation(d.startLocation);
           if (d.plan && d.plan.sat && d.plan.sun) setPlan(d.plan);
           if (Array.isArray(d.hiddenIds)) setHiddenIds(d.hiddenIds);
+          if (Array.isArray(d.customActivities)) setCustomActivities(d.customActivities);
           lastSavedJson.current = JSON.stringify(d);
         }
         setSyncStatus('connected');
@@ -627,6 +714,7 @@ function JGAPlaner({ roomCode, onLeave }) {
           if (d.startLocation && d.startLocation.coords) setStartLocation(d.startLocation);
           if (d.plan && d.plan.sat && d.plan.sun) setPlan(d.plan);
           if (Array.isArray(d.hiddenIds)) setHiddenIds(d.hiddenIds);
+          if (Array.isArray(d.customActivities)) setCustomActivities(d.customActivities);
           lastSavedJson.current = remoteJson;
           setTimeout(() => { isApplyingRemoteUpdate.current = false; }, 100);
         }
@@ -641,7 +729,7 @@ function JGAPlaner({ roomCode, onLeave }) {
   // Auto-Save mit Debounce
   useEffect(() => {
     if (!loaded || isApplyingRemoteUpdate.current) return;
-    const payload = { budget, groupSize, startLocation, plan, hiddenIds };
+    const payload = { budget, groupSize, startLocation, plan, hiddenIds, customActivities };
     const json = JSON.stringify(payload);
     if (json === lastSavedJson.current) return;
     const timer = setTimeout(async () => {
@@ -659,7 +747,7 @@ function JGAPlaner({ roomCode, onLeave }) {
       }
     }, 600);
     return () => clearTimeout(timer);
-  }, [budget, groupSize, startLocation, plan, hiddenIds, loaded, roomCode]);
+  }, [budget, groupSize, startLocation, plan, hiddenIds, customActivities, loaded, roomCode]);
 
   const enriched = useMemo(() => {
     const result = { sat: [], sun: [] };
@@ -690,8 +778,13 @@ function JGAPlaner({ roomCode, onLeave }) {
   const remaining = budget - totalSpent;
   const pct = Math.min(100, Math.max(0, (totalSpent / Math.max(budget, 1)) * 100));
 
+  const allLibraryActivities = useMemo(
+    () => [...ACTIVITIES, ...customActivities.map(a => ({ ...a, isCustom: true }))],
+    [customActivities]
+  );
+
   const filteredActivities = useMemo(() => {
-    return ACTIVITIES.filter(a => {
+    return allLibraryActivities.filter(a => {
       const isHidden = hiddenIds.includes(a.id);
       if (isHidden && !showHidden) return false;
       if (filterCat !== 'all' && a.cat !== filterCat) return false;
@@ -699,14 +792,85 @@ function JGAPlaner({ roomCode, onLeave }) {
         const s = search.toLowerCase();
         if (!a.name.toLowerCase().includes(s) &&
             !(a.region || '').toLowerCase().includes(s) &&
-            !a.desc.toLowerCase().includes(s)) return false;
+            !(a.desc || '').toLowerCase().includes(s)) return false;
       }
       return true;
     });
-  }, [filterCat, search, hiddenIds, showHidden]);
+  }, [allLibraryActivities, filterCat, search, hiddenIds, showHidden]);
+
+  const lastPlannedItem = useMemo(() => {
+    for (let i = plan.sun.length - 1; i >= 0; i--) {
+      if (plan.sun[i].coords) return plan.sun[i];
+    }
+    for (let i = plan.sat.length - 1; i >= 0; i--) {
+      if (plan.sat[i].coords) return plan.sat[i];
+    }
+    return null;
+  }, [plan]);
+
+  const nearbyOrigin = lastPlannedItem || startLocation;
+  const nearbyKey = nearbyOrigin && nearbyOrigin.coords
+    ? `${nearbyOrigin.coords[0].toFixed(3)},${nearbyOrigin.coords[1].toFixed(3)}`
+    : null;
+
+  useEffect(() => {
+    if (!nearbyKey) {
+      setNearbySuggestions([]);
+      setLoadingNearby(false);
+      setNearbyError(false);
+      return;
+    }
+    setLoadingNearby(true);
+    setNearbyError(false);
+    const controller = new AbortController();
+    const [latStr, lngStr] = nearbyKey.split(',');
+    const timer = setTimeout(async () => {
+      try {
+        const results = await fetchNearbyPOIs(parseFloat(latStr), parseFloat(lngStr), 30, controller.signal);
+        if (!controller.signal.aborted) {
+          setNearbySuggestions(results);
+          setLoadingNearby(false);
+        }
+      } catch (e) {
+        if (!controller.signal.aborted) {
+          setNearbyError(true);
+          setLoadingNearby(false);
+        }
+      }
+    }, 800);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [nearbyKey]);
+
+  const plannedIds = useMemo(() => {
+    const s = new Set();
+    DAYS.forEach(d => plan[d].forEach(i => s.add(i.id)));
+    return s;
+  }, [plan]);
+
+  const filteredNearby = useMemo(() => {
+    const customIds = new Set(customActivities.map(c => c.id));
+    return nearbySuggestions
+      .filter(s => !hiddenIds.includes(s.id) && !plannedIds.has(s.id) && !customIds.has(s.id))
+      .slice(0, 8);
+  }, [nearbySuggestions, hiddenIds, plannedIds, customActivities]);
 
   const addActivity = (act) => {
     setPlan(prev => ({ ...prev, [activeDay]: [...prev[activeDay], { ...act, instanceId: uid(), status: 'offen', done: false }] }));
+  };
+  const addCustomToLibrary = (act) => {
+    setCustomActivities(prev => prev.some(p => p.id === act.id) ? prev : [...prev, act]);
+  };
+  const removeCustomFromLibrary = (id) => {
+    setCustomActivities(prev => prev.filter(a => a.id !== id));
+  };
+  const handleCustomSave = (act, alsoAddToPlan) => {
+    addCustomToLibrary(act);
+    if (alsoAddToPlan) addActivity(act);
+  };
+  const addSuggestionToLibraryAndPlan = (suggestion) => {
+    const { _distanceKm, source, isCustom, ...rest } = suggestion;
+    addCustomToLibrary(rest);
+    addActivity(rest);
   };
   const removeItem = (day, instanceId) => setPlan(prev => ({ ...prev, [day]: prev[day].filter(i => i.instanceId !== instanceId) }));
   const moveItem = (day, instanceId, dir) => {
@@ -1013,6 +1177,56 @@ function JGAPlaner({ roomCode, onLeave }) {
               );
             })}
           </div>
+          <div className="mb-3 rounded-lg border border-violet-200 dark:border-violet-900 bg-violet-50/40 dark:bg-violet-950/20 p-3">
+            <div className="flex items-center justify-between mb-2 gap-2">
+              <h3 className="text-sm font-medium flex items-center gap-1.5 min-w-0">
+                <Sparkles size={14} className="text-violet-500 flex-shrink-0" />
+                <span className="truncate">
+                  In der Nähe von <span className="text-violet-700 dark:text-violet-300">{nearbyOrigin ? nearbyOrigin.name : 'Start'}</span>
+                </span>
+              </h3>
+              <button onClick={() => setShowNearby(s => !s)} className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 flex items-center gap-1 flex-shrink-0">
+                {showNearby ? <><EyeOff size={11} /> Aus</> : <><Eye size={11} /> Ein</>}
+              </button>
+            </div>
+            {showNearby && (
+              <>
+                {loadingNearby && (
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-1.5 py-2">
+                    <Loader2 size={12} className="animate-spin" /> Suche Vorschläge bei OpenStreetMap…
+                  </div>
+                )}
+                {!loadingNearby && nearbyError && (
+                  <div className="text-xs text-amber-600 dark:text-amber-400 py-1">Overpass-API antwortet gerade nicht – später nochmal versuchen.</div>
+                )}
+                {!loadingNearby && !nearbyError && !nearbyKey && (
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400 py-1">Plane eine Aktivität mit Standort – dann schlagen wir hier Spots in 30 km Umkreis vor.</div>
+                )}
+                {!loadingNearby && !nearbyError && nearbyKey && filteredNearby.length === 0 && (
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400 py-1">Keine weiteren Vorschläge im 30-km-Radius.</div>
+                )}
+                {!loadingNearby && filteredNearby.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {filteredNearby.map(s => {
+                      const Cat = CATS[s.cat];
+                      return (
+                        <div key={s.id} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2.5 flex gap-2 items-center">
+                          <div className={`flex-shrink-0 w-8 h-8 rounded-md flex items-center justify-center ${Cat.badge}`}><Cat.Icon size={14} /></div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium leading-snug truncate">{s.name}</p>
+                            <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">{Cat.label} · {s._distanceKm.toFixed(1)} km</p>
+                          </div>
+                          <button onClick={() => addSuggestionToLibraryAndPlan(s)} className="flex-shrink-0 text-xs px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 inline-flex items-center gap-1" title="In Bibliothek + Tag übernehmen">
+                            <Plus size={11} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
           {hiddenIds.length > 0 && (
             <div className="flex items-center justify-between mb-3 px-3 py-2 bg-zinc-100 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-md text-xs">
               <span className="text-zinc-600 dark:text-zinc-400 flex items-center gap-1.5">
@@ -1030,16 +1244,24 @@ function JGAPlaner({ roomCode, onLeave }) {
             {filteredActivities.map(a => {
               const Cat = CATS[a.cat];
               const isHidden = hiddenIds.includes(a.id);
+              const isCustom = !!a.isCustom;
               return (
-                <div key={a.id} className={`relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 flex flex-col gap-2 ${isHidden ? 'opacity-50' : ''}`}>
-                  <button onClick={() => isHidden ? unhideActivity(a.id) : hideActivity(a.id)} className="absolute top-2 right-2 w-6 h-6 rounded-md text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 flex items-center justify-center" title={isHidden ? 'Wieder einblenden' : 'Aus Bibliothek ausblenden'}>
-                    {isHidden ? <Undo2 size={12} /> : <X size={12} />}
-                  </button>
+                <div key={a.id} className={`relative bg-white dark:bg-zinc-900 border ${isCustom ? 'border-violet-300 dark:border-violet-800' : 'border-zinc-200 dark:border-zinc-800'} rounded-lg p-3 flex flex-col gap-2 ${isHidden ? 'opacity-50' : ''}`}>
+                  {isCustom ? (
+                    <button onClick={() => { if (confirm('Eigene Aktivität endgültig aus der Bibliothek löschen?')) removeCustomFromLibrary(a.id); }} className="absolute top-2 right-2 w-6 h-6 rounded-md text-zinc-400 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-600 dark:hover:text-red-400 flex items-center justify-center" title="Eigene Aktivität löschen">
+                      <X size={12} />
+                    </button>
+                  ) : (
+                    <button onClick={() => isHidden ? unhideActivity(a.id) : hideActivity(a.id)} className="absolute top-2 right-2 w-6 h-6 rounded-md text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200 flex items-center justify-center" title={isHidden ? 'Wieder einblenden' : 'Aus Bibliothek ausblenden'}>
+                      {isHidden ? <Undo2 size={12} /> : <X size={12} />}
+                    </button>
+                  )}
                   <div className="flex gap-2 items-start pr-6">
                     <div className={`flex-shrink-0 w-8 h-8 rounded-md flex items-center justify-center ${Cat.badge}`}><Cat.Icon size={16} /></div>
                     <p className="text-sm font-medium leading-snug flex-1">{a.name}</p>
                   </div>
                   <div className="text-xs text-zinc-500 dark:text-zinc-400 flex gap-1.5 flex-wrap items-center">
+                    {isCustom && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300 font-medium">Eigene</span>}
                     <span>{Cat.label}</span><span>·</span><span>{a.region}</span>
                     {a.duration > 0 && <><span>·</span><span>{fmtDur(a.duration)}</span></>}
                   </div>
@@ -1064,7 +1286,7 @@ function JGAPlaner({ roomCode, onLeave }) {
         </div>
       </div>
 
-      {showCustomModal && <CustomActivityModal onClose={() => setShowCustomModal(false)} onSave={addActivity} activeDay={activeDay} />}
+      {showCustomModal && <CustomActivityModal onClose={() => setShowCustomModal(false)} onSave={handleCustomSave} activeDay={activeDay} />}
       {showStartPicker && <PlaceModal title="Start am Samstag" subtitle="Wo seid ihr Samstag früh?" initial={startLocation.name} onClose={() => setShowStartPicker(false)} onSelect={(p) => { setStartLocation(p); setShowStartPicker(false); }} />}
 
       {showShareToast && (
@@ -1119,18 +1341,24 @@ function CustomActivityModal({ onClose, onSave, activeDay }) {
   }, [localMatches, onlineMatches, selectedPlace]);
 
   const canSave = name.trim().length > 0;
-  const submit = () => {
+  const buildActivity = () => ({
+    id: 'custom-' + uid(),
+    cat,
+    name: name.trim(),
+    region: selectedPlace ? selectedPlace.name : (placeQuery.trim() || 'Eigene'),
+    coords: selectedPlace ? selectedPlace.coords : null,
+    duration: Math.max(0, duration),
+    price: Math.max(0, price),
+    desc: desc.trim() || 'Eigene Aktivität'
+  });
+  const submitLibraryOnly = () => {
     if (!canSave) return;
-    onSave({
-      id: 'custom-' + uid(),
-      cat,
-      name: name.trim(),
-      region: selectedPlace ? selectedPlace.name : (placeQuery.trim() || 'Eigene'),
-      coords: selectedPlace ? selectedPlace.coords : null,
-      duration: Math.max(0, duration),
-      price: Math.max(0, price),
-      desc: desc.trim() || 'Eigene Aktivität'
-    });
+    onSave(buildActivity(), false);
+    onClose();
+  };
+  const submitAndAdd = () => {
+    if (!canSave) return;
+    onSave(buildActivity(), true);
     onClose();
   };
   return (
@@ -1207,10 +1435,15 @@ function CustomActivityModal({ onClose, onSave, activeDay }) {
               className="w-full px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md focus:outline-none focus:border-zinc-400 resize-none" />
           </div>
         </div>
-        <div className="flex gap-2 p-4 border-t border-zinc-200 dark:border-zinc-800 sticky bottom-0 bg-white dark:bg-zinc-900">
-          <button onClick={onClose} className="flex-1 py-2 text-sm border border-zinc-300 dark:border-zinc-700 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">Abbrechen</button>
-          <button onClick={submit} disabled={!canSave} className="flex-1 py-2 text-sm bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-md hover:bg-zinc-700 dark:hover:bg-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed">
-            Zu {DAY_SHORT[activeDay].split(' ')[0]} hinzufügen
+        <div className="flex flex-col gap-2 p-4 border-t border-zinc-200 dark:border-zinc-800 sticky bottom-0 bg-white dark:bg-zinc-900">
+          <div className="flex gap-2">
+            <button onClick={onClose} className="flex-1 py-2 text-sm border border-zinc-300 dark:border-zinc-700 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800">Abbrechen</button>
+            <button onClick={submitLibraryOnly} disabled={!canSave} className="flex-1 py-2 text-sm border border-zinc-300 dark:border-zinc-700 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed">
+              Nur in Bibliothek
+            </button>
+          </div>
+          <button onClick={submitAndAdd} disabled={!canSave} className="w-full py-2 text-sm bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-md hover:bg-zinc-700 dark:hover:bg-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed">
+            In Bibliothek + zu {DAY_SHORT[activeDay].split(' ')[0]} hinzufügen
           </button>
         </div>
       </div>
